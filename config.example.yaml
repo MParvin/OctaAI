@@ -1,0 +1,35 @@
+projects_root: "/home/user/Projects"
+
+llm:
+  # Provider options: "ollama", "openai", "claude"
+  provider: "ollama"
+  model: "qwen2.5:32b"
+  base_url: "http://localhost:11434"
+  # For OpenAI: set OPENAI_API_KEY env var or uncomment:
+  # api_key: "sk-..."
+  # For Claude: set ANTHROPIC_API_KEY env var or uncomment:
+  # api_key: "sk-ant-..."
+  temperature: 0.3
+  max_tokens: 4096
+
+safety:
+  allow_paths:
+    - "/home/user/Projects"
+  deny_commands:
+    - "rm -rf /"
+    - ":(){ :|:& };:"
+    - "mkfs"
+    - "dd if=/dev/zero"
+  require_confirmation_for:
+    - "apt upgrade"
+    - "dnf upgrade"
+    - "yum upgrade"
+
+ssh:
+  default_port: 22
+  known_hosts_file: "~/.ssh/known_hosts"
+  default_key_path: "~/.ssh/id_rsa"
+
+storage:
+  type: "sqlite"
+  path: "~/.config/octaai/state.db"
