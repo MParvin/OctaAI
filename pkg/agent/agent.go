@@ -155,7 +155,7 @@ func (a *Agent) planTasks(ctx context.Context, goal *storage.Goal) error {
 
 	// First, ask LLM to extract project name from goal
 	projectName, needsProject := a.extractProjectInfo(ctx, goal)
-	
+
 	now := time.Now()
 	tasks := []*storage.Task{}
 
@@ -435,7 +435,7 @@ func (a *Agent) executeLLMTask(ctx context.Context, goal *storage.Goal, task *st
 func (a *Agent) checkIfMoreWorkNeeded(ctx context.Context, goal *storage.Goal, task *storage.Task, lastResult string) (bool, string) {
 	// Get list of files in project directory
 	projectFiles := a.getProjectFiles(goal.ID)
-	
+
 	prompt := fmt.Sprintf(`You are developing a project to achieve this goal:
 Goal: %s
 
@@ -560,7 +560,7 @@ Has the goal been fully satisfied? Answer ONLY with YES or NO (first word).`, go
 
 	// Trim whitespace and convert to uppercase for checking
 	response := strings.TrimSpace(strings.ToUpper(resp.Content))
-	
+
 	// Check if response starts with YES or contains YES as first word
 	if strings.HasPrefix(response, "YES") || strings.HasPrefix(response, "YES,") || strings.HasPrefix(response, "YES.") {
 		return nil
