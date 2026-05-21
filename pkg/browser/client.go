@@ -127,10 +127,10 @@ func (c *Client) GetStats() map[string]interface{} {
 	defer c.mu.RUnlock()
 
 	return map[string]interface{}{
-		"id":              c.ID,
-		"connected_at":    c.connectedAt,
-		"last_heartbeat":  c.lastHeartbeat,
+		"id":               c.ID,
+		"connected_at":     c.connectedAt,
+		"last_heartbeat":   c.lastHeartbeat,
 		"pending_commands": len(c.pendingCmds),
-		"alive":           !c.closed && time.Since(c.lastHeartbeat) < 2*time.Minute,
+		"alive":            !c.closed && time.Since(c.lastHeartbeat) < 2*time.Minute,
 	}
 }

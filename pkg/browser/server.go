@@ -149,7 +149,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.clientsMu.RUnlock()
 
 	status := map[string]interface{}{
-		"status":          "ok",
+		"status":             "ok",
 		"connected_browsers": clientCount,
 	}
 
