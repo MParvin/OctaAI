@@ -9,6 +9,7 @@ OctaAI is an autonomous AI agent that can design, implement, test, deploy, and m
 - **Code Generation & Self-Repair**: Generates code, runs tests, and fixes errors automatically
 - **Remote Server Management**: SSH into servers, install packages, configure services
 - **Deployment Automation**: Deploy applications, configure Nginx, setup SSL certificates
+- **Browser Automation**: Control a live Firefox browser — navigate, fill forms, extract data, and automate web workflows via a companion extension
 - **Safety First**: Configurable allowed paths and command filtering
 
 ## Architecture
@@ -23,7 +24,27 @@ octa-agentd  (Daemon - Agent Runtime)
           +-- Git Tools
           +-- SSH Tools
           +-- HTTP Tools
+          +-- Browser Tools  ←── WebSocket ──► Firefox Extension
 ```
+
+## Browser Automation
+
+OctaAI can control a live Firefox browser through a companion extension, enabling web scraping, form automation, login flows, and multi-step web workflows.
+
+### Quick setup
+
+1. Build and start the daemon with browser support:
+   ```bash
+   ./bin/octa-agentd --browser-port 8765
+   ```
+2. Build and load the Firefox extension:
+   ```bash
+   cd ../octaai-firefox-addon && npm install && npm run build
+   # Then in Firefox: about:debugging → Load Temporary Add-on → dist/manifest.json
+   ```
+3. Set a shared token in `config.yaml` and in the extension's Settings page.
+
+See [docs/BROWSER_AUTOMATION.md](docs/BROWSER_AUTOMATION.md) for the full setup guide and [examples/browser/](examples/browser/) for usage examples.
 
 ## Quick Start
 
