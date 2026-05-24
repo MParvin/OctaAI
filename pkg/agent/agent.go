@@ -90,8 +90,17 @@ func (a *Agent) ProcessGoal(ctx context.Context, goalID string) error {
 			if task.Status == "pending" || task.Status == "running" {
 				allDone = false
 			}
-			if task.Status == "failed" && task.Attempts >= task.MaxAttempts {
-				hasFailures = true
+			if task.Status == "failed" {
+				if task.Attempts >= task.MaxAttempts {
+					hasFailures = true
+				} else {
+					// Task failed but has retries remaining - reset to pending
+					a.log(ctx, "info", fmt.Sprintf("Retrying failed task: %s (attempt %d/%d)", task.Description, task.Attempts+1, task.MaxAttempts))
+					task.Status = "pending"
+					task.UpdatedAt = time.Now()
+					a.storage.UpdateTask(&task)
+					allDone = false
+				}
 			}
 		}
 
@@ -356,12 +365,27 @@ func (a *Agent) executeLLMTask(ctx context.Context, goal *storage.Goal, task *st
 	toolCall, err := a.parseToolCall(resp.Content)
 	if err != nil {
 		a.log(ctx, "error", fmt.Sprintf("Failed to parse tool call: %v. Response: %s", err, resp.Content[:min(200, len(resp.Content))]))
+		// If we can retry, set to pending instead of failed
+		if task.Attempts < task.MaxAttempts {
+			task.Status = "pending"
+			task.Error = fmt.Sprintf("Parse error: %v", err)
+			task.UpdatedAt = time.Now()
+			return a.storage.UpdateTask(task)
+		}
 		return a.failTask(task, err)
 	}
 
 	// Execute the tool
 	tool, ok := a.tools.Get(toolCall.ToolName)
 	if !ok {
+		// If tool not found, retry with pending status if attempts remain
+		if task.Attempts < task.MaxAttempts {
+			a.log(ctx, "warn", fmt.Sprintf("Tool not found: %s, will retry", toolCall.ToolName))
+			task.Status = "pending"
+			task.Error = fmt.Sprintf("Tool not found: %s", toolCall.ToolName)
+			task.UpdatedAt = time.Now()
+			return a.storage.UpdateTask(task)
+		}
 		return a.failTask(task, fmt.Errorf("tool not found: %s", toolCall.ToolName))
 	}
 
@@ -673,35 +697,25 @@ func (a *Agent) buildTaskExecutionPrompt(goal *storage.Goal, task *storage.Task)
 		contextInfo = fmt.Sprintf("\n\nProject context:\n%s\n", projectContext)
 	}
 
-	return fmt.Sprintf(`You are an autonomous agent working on this goal:
-Goal: %s
+	return fmt.Sprintf(`Goal: %s
 
-Current task: %s
+Task: %s
 %s
-Available tools:%s
+Tools:%s
 
-Choose ONE tool and provide arguments. Respond ONLY with valid JSON in this exact format:
-{
-  "tool": "tool_name",
-  "args": {"key": "value"}
-}
+INSTRUCTIONS:
+1. Analyze the task and choose the appropriate tool
+2. For creating files, use "filesystem" with action "write_file", providing the full file content
+3. You MUST respond with ONLY a JSON object - no explanations, no markdown
+4. The JSON MUST have exactly two keys: "tool" and "args"
 
-IMPORTANT: 
-- For filesystem tool, action MUST be one of: create_directory, write_file, read_file, list_files, append_file
-- All file paths should be RELATIVE to the project directory (e.g., "main.py", "src/app.py")
-- If working in a project, files go inside the project directory, not at the root
+EXAMPLE - Creating a docker-compose file:
+{"tool": "filesystem", "args": {"action": "write_file", "path": "project-name/docker-compose.yml", "content": "version: '3'\nservices:\n  web:\n    image: nginx\n    ports:\n      - '80:80'"}}
 
-Examples:
-Create a file inside project:
-{"tool": "filesystem", "args": {"action": "write_file", "path": "my-project/main.py", "content": "print('hello')"}}
+EXAMPLE - Running a command:
+{"tool": "command", "args": {"command": "ls -la", "cwd": "project-name"}}
 
-Create a directory:
-{"tool": "filesystem", "args": {"action": "create_directory", "path": "my_project"}}
-
-Run a command in project directory:
-{"tool": "command", "args": {"command": "python main.py", "cwd": "my-project"}}
-
-Your response (JSON only):`, goal.Description, task.Description, contextInfo, toolsList)
+Your JSON response:`, goal.Description, task.Description, contextInfo, toolsList)
 }
 
 // getProjectContext retrieves context about the project from completed tasks
@@ -739,34 +753,62 @@ func (a *Agent) parseToolCall(content string) (*toolCall, error) {
 	content = strings.ReplaceAll(content, "```", "")
 	content = strings.TrimSpace(content)
 
+	// Log the raw content for debugging
+	a.log(context.Background(), "debug", fmt.Sprintf("Parsing tool call from: %s", content[:min(500, len(content))]))
+
 	start := strings.Index(content, "{")
 	end := strings.LastIndex(content, "}")
 
 	if start == -1 || end == -1 {
-		return nil, fmt.Errorf("no JSON object found in response (length: %d)", len(content))
+		return nil, fmt.Errorf("no JSON object found in response (length: %d): %s", len(content), content[:min(100, len(content))])
 	}
 
 	jsonStr := content[start : end+1]
 
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON: %w. JSON: %s", err, jsonStr[:min(100, len(jsonStr))])
+		return nil, fmt.Errorf("failed to parse JSON: %w. JSON: %s", err, jsonStr[:min(200, len(jsonStr))])
 	}
 
-	toolName, ok := parsed["tool"].(string)
-	if !ok {
-		return nil, fmt.Errorf("tool name not found or not a string in response")
+	// Try multiple possible key names for the tool
+	toolName := ""
+	for _, key := range []string{"tool", "tool_name", "toolName", "name"} {
+		if name, ok := parsed[key].(string); ok && name != "" {
+			toolName = name
+			break
+		}
+	}
+	if toolName == "" {
+		return nil, fmt.Errorf("tool name not found in response. Keys found: %v", getMapKeys(parsed))
 	}
 
-	args, ok := parsed["args"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("args not found or not an object in response")
+	// Try multiple possible key names for the arguments
+	var args map[string]interface{}
+	for _, key := range []string{"args", "arguments", "params", "parameters", "tool_args"} {
+		if a, ok := parsed[key].(map[string]interface{}); ok {
+			args = a
+			break
+		}
 	}
+	if args == nil {
+		return nil, fmt.Errorf("args not found or not an object in response. Keys found: %v", getMapKeys(parsed))
+	}
+
+	a.log(context.Background(), "debug", fmt.Sprintf("Parsed tool call: %s with args: %v", toolName, args))
 
 	return &toolCall{
 		ToolName: toolName,
 		Args:     args,
 	}, nil
+}
+
+// getMapKeys returns the keys of a map for debugging
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Helper function for min

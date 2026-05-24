@@ -15,6 +15,7 @@ type Config struct {
 	Safety       SafetyConfig  `yaml:"safety"`
 	SSH          SSHConfig     `yaml:"ssh"`
 	Storage      StorageConfig `yaml:"storage"`
+	Browser      BrowserConfig `yaml:"browser"`
 }
 
 // LLMConfig holds LLM provider configuration
@@ -46,6 +47,15 @@ type StorageConfig struct {
 	Type string `yaml:"type"` // "sqlite", "postgres"
 	Path string `yaml:"path"` // For sqlite
 	DSN  string `yaml:"dsn"`  // For postgres
+}
+
+// BrowserConfig holds browser automation configuration
+type BrowserConfig struct {
+	Enabled        bool     `yaml:"enabled"`
+	Port           int      `yaml:"port"`
+	Token          string   `yaml:"token"`
+	AutoScreenshot bool     `yaml:"auto_screenshot"`
+	BrowserDomains []string `yaml:"browser_domains"`
 }
 
 // DefaultConfig returns a configuration with sensible defaults
@@ -85,6 +95,13 @@ func DefaultConfig() *Config {
 		Storage: StorageConfig{
 			Type: "sqlite",
 			Path: filepath.Join(homeDir, ".config", "octaai", "state.db"),
+		},
+		Browser: BrowserConfig{
+			Enabled:        false, // Disabled by default
+			Port:           8765,
+			Token:          "",
+			AutoScreenshot: true,
+			BrowserDomains: []string{},
 		},
 	}
 }
