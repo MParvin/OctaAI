@@ -82,6 +82,56 @@ func (s *SQLiteStorage) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_tasks_goal_id ON tasks(goal_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 	CREATE INDEX IF NOT EXISTS idx_logs_goal_id ON execution_logs(goal_id);
+
+	CREATE TABLE IF NOT EXISTS execution_steps (
+		id TEXT PRIMARY KEY,
+		goal_id TEXT NOT NULL,
+		task_id TEXT,
+		description TEXT NOT NULL,
+		status TEXT NOT NULL,
+		input_json TEXT NOT NULL,
+		output_json TEXT,
+		validation TEXT,
+		validation_detail TEXT,
+		retry_count INTEGER DEFAULT 0,
+		max_retries INTEGER DEFAULT 3,
+		started_at DATETIME,
+		completed_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		checkpoint_id TEXT,
+		FOREIGN KEY (goal_id) REFERENCES goals(id)
+	);
+
+	CREATE TABLE IF NOT EXISTS checkpoints (
+		id TEXT PRIMARY KEY,
+		goal_id TEXT NOT NULL,
+		state TEXT NOT NULL,
+		step_index INTEGER DEFAULT 0,
+		payload TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (goal_id) REFERENCES goals(id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_steps_goal_id ON execution_steps(goal_id);
+	CREATE INDEX IF NOT EXISTS idx_checkpoints_goal_id ON checkpoints(goal_id);
+
+	CREATE TABLE IF NOT EXISTS approval_requests (
+		id TEXT PRIMARY KEY,
+		goal_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL,
+		tool_args_json TEXT NOT NULL,
+		fingerprint TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		status TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		resolved_at DATETIME,
+		FOREIGN KEY (goal_id) REFERENCES goals(id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_approvals_status ON approval_requests(status);
+	CREATE INDEX IF NOT EXISTS idx_approvals_goal_id ON approval_requests(goal_id);
 	`
 
 	_, err := s.db.Exec(schema)
@@ -360,7 +410,167 @@ func (s *SQLiteStorage) GetLogsByGoal(goalID string) ([]*ExecutionLog, error) {
 	return logs, nil
 }
 
-// Close implements Storage.Close
+// CreateStep implements Storage.CreateStep
+func (s *SQLiteStorage) CreateStep(step *ExecutionStepRecord) error {
+	query := `INSERT INTO execution_steps (id, goal_id, task_id, description, status, input_json, output_json,
+	          validation, validation_detail, retry_count, max_retries, started_at, completed_at, created_at, updated_at, checkpoint_id)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query,
+		step.ID, step.GoalID, step.TaskID, step.Description, step.Status,
+		step.InputJSON, step.OutputJSON, step.Validation, step.ValidationDetail,
+		step.RetryCount, step.MaxRetries, step.StartedAt, step.CompletedAt,
+		step.CreatedAt, step.UpdatedAt, step.CheckpointID,
+	)
+	return err
+}
+
+// UpdateStep implements Storage.UpdateStep
+func (s *SQLiteStorage) UpdateStep(step *ExecutionStepRecord) error {
+	query := `UPDATE execution_steps SET description = ?, status = ?, input_json = ?, output_json = ?,
+	          validation = ?, validation_detail = ?, retry_count = ?, max_retries = ?,
+	          started_at = ?, completed_at = ?, updated_at = ?, checkpoint_id = ? WHERE id = ?`
+	_, err := s.db.Exec(query,
+		step.Description, step.Status, step.InputJSON, step.OutputJSON,
+		step.Validation, step.ValidationDetail, step.RetryCount, step.MaxRetries,
+		step.StartedAt, step.CompletedAt, step.UpdatedAt, step.CheckpointID, step.ID,
+	)
+	return err
+}
+
+// GetStepsByGoal implements Storage.GetStepsByGoal
+func (s *SQLiteStorage) GetStepsByGoal(goalID string) ([]ExecutionStepRecord, error) {
+	query := `SELECT id, goal_id, task_id, description, status, input_json, output_json,
+	          validation, validation_detail, retry_count, max_retries, started_at, completed_at,
+	          created_at, updated_at, checkpoint_id
+	          FROM execution_steps WHERE goal_id = ? ORDER BY created_at ASC`
+	rows, err := s.db.Query(query, goalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var steps []ExecutionStepRecord
+	for rows.Next() {
+		var step ExecutionStepRecord
+		err := rows.Scan(
+			&step.ID, &step.GoalID, &step.TaskID, &step.Description, &step.Status,
+			&step.InputJSON, &step.OutputJSON, &step.Validation, &step.ValidationDetail,
+			&step.RetryCount, &step.MaxRetries, &step.StartedAt, &step.CompletedAt,
+			&step.CreatedAt, &step.UpdatedAt, &step.CheckpointID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		steps = append(steps, step)
+	}
+	return steps, nil
+}
+
+// CreateCheckpoint implements Storage.CreateCheckpoint
+func (s *SQLiteStorage) CreateCheckpoint(cp *CheckpointRecord) error {
+	query := `INSERT INTO checkpoints (id, goal_id, state, step_index, payload, created_at)
+	          VALUES (?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query, cp.ID, cp.GoalID, cp.State, cp.StepIndex, cp.Payload, cp.CreatedAt)
+	return err
+}
+
+// GetCheckpoint implements Storage.GetCheckpoint
+func (s *SQLiteStorage) GetCheckpoint(id string) (*CheckpointRecord, error) {
+	query := `SELECT id, goal_id, state, step_index, payload, created_at FROM checkpoints WHERE id = ?`
+	cp := &CheckpointRecord{}
+	err := s.db.QueryRow(query, id).Scan(&cp.ID, &cp.GoalID, &cp.State, &cp.StepIndex, &cp.Payload, &cp.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return cp, nil
+}
+
+// GetCheckpointsByGoal implements Storage.GetCheckpointsByGoal
+func (s *SQLiteStorage) GetCheckpointsByGoal(goalID string) ([]CheckpointRecord, error) {
+	query := `SELECT id, goal_id, state, step_index, payload, created_at FROM checkpoints WHERE goal_id = ? ORDER BY created_at DESC`
+	rows, err := s.db.Query(query, goalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cps []CheckpointRecord
+	for rows.Next() {
+		var cp CheckpointRecord
+		if err := rows.Scan(&cp.ID, &cp.GoalID, &cp.State, &cp.StepIndex, &cp.Payload, &cp.CreatedAt); err != nil {
+			return nil, err
+		}
+		cps = append(cps, cp)
+	}
+	return cps, nil
+}
+
+// CreateApproval implements Storage.CreateApproval
+func (s *SQLiteStorage) CreateApproval(req *ApprovalRequest) error {
+	query := `INSERT INTO approval_requests (id, goal_id, task_id, tool_name, tool_args_json, fingerprint, reason, status, created_at, resolved_at)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query,
+		req.ID, req.GoalID, req.TaskID, req.ToolName, req.ToolArgsJSON,
+		req.Fingerprint, req.Reason, req.Status, req.CreatedAt, req.ResolvedAt,
+	)
+	return err
+}
+
+// GetApproval implements Storage.GetApproval
+func (s *SQLiteStorage) GetApproval(id string) (*ApprovalRequest, error) {
+	query := `SELECT id, goal_id, task_id, tool_name, tool_args_json, fingerprint, reason, status, created_at, resolved_at
+	          FROM approval_requests WHERE id = ?`
+	req := &ApprovalRequest{}
+	err := s.db.QueryRow(query, id).Scan(
+		&req.ID, &req.GoalID, &req.TaskID, &req.ToolName, &req.ToolArgsJSON,
+		&req.Fingerprint, &req.Reason, &req.Status, &req.CreatedAt, &req.ResolvedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+// UpdateApproval implements Storage.UpdateApproval
+func (s *SQLiteStorage) UpdateApproval(req *ApprovalRequest) error {
+	query := `UPDATE approval_requests SET status = ?, resolved_at = ? WHERE id = ?`
+	_, err := s.db.Exec(query, req.Status, req.ResolvedAt, req.ID)
+	return err
+}
+
+// ListPendingApprovals implements Storage.ListPendingApprovals
+func (s *SQLiteStorage) ListPendingApprovals() ([]ApprovalRequest, error) {
+	query := `SELECT id, goal_id, task_id, tool_name, tool_args_json, fingerprint, reason, status, created_at, resolved_at
+	          FROM approval_requests WHERE status = 'pending' ORDER BY created_at ASC`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reqs []ApprovalRequest
+	for rows.Next() {
+		var req ApprovalRequest
+		if err := rows.Scan(
+			&req.ID, &req.GoalID, &req.TaskID, &req.ToolName, &req.ToolArgsJSON,
+			&req.Fingerprint, &req.Reason, &req.Status, &req.CreatedAt, &req.ResolvedAt,
+		); err != nil {
+			return nil, err
+		}
+		reqs = append(reqs, req)
+	}
+	return reqs, nil
+}
+
+// HasApprovedAction implements Storage.HasApprovedAction
+func (s *SQLiteStorage) HasApprovedAction(goalID, fingerprint string) (bool, error) {
+	query := `SELECT COUNT(*) FROM approval_requests WHERE goal_id = ? AND fingerprint = ? AND status = 'approved'`
+	var count int
+	err := s.db.QueryRow(query, goalID, fingerprint).Scan(&count)
+	return count > 0, err
+}
+
+// Close implements Storage.Close()
 func (s *SQLiteStorage) Close() error {
 	return s.db.Close()
 }

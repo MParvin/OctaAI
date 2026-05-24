@@ -134,10 +134,13 @@ octaai/
 
 - [x] Phase 1: Skeleton & LLM Provider
 - [x] Phase 2: Filesystem & Code Runner Tools
-- [ ] Phase 3: Error Loop & Self-Repair
-- [ ] Phase 4: SSH Tool
-- [ ] Phase 5: Workflow Integration
-- [ ] Phase 6: Memory & Vector Store
+- [x] Phase 3: Browser Automation (Firefox addon)
+- [x] Phase 4: Execution Engine Refactor (state machine, steps, evaluator)
+- [x] Phase 5: Plugins, Checkpoints, Workflow Validation, Observability
+- [x] Phase 6: Docker Isolation, Human Approval CLI, Semantic Memory
+- [x] Phase 7: Parallel Execution Graph, Dynamic Replanning
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [prompt.md](prompt.md) for the engineering roadmap.
 
 ## License
 

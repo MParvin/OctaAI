@@ -19,7 +19,9 @@ safety:
     - "rm -rf /"
     - ":(){ :|:& };:"
     - "mkfs"
-    - "dd if=/dev/zero"
+    - "dd"
+    - "fdisk"
+    - "shred"
   require_confirmation_for:
     - "apt upgrade"
     - "dnf upgrade"
@@ -33,3 +35,22 @@ ssh:
 storage:
   type: "sqlite"
   path: "~/.config/octaai/state.db"
+
+isolation:
+  enabled: false
+  max_parallel: 3
+  require_docker_for:
+    - "command"
+  docker:
+    enabled: false
+    image: "alpine:3.19"
+    network: "none"
+    memory_limit: "512m"
+    cpu_limit: "1.0"
+    read_only_root: true
+
+engine:
+  max_loops: 50
+  max_retries: 3
+  enable_replan: true
+  enable_parallel: true

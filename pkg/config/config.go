@@ -10,20 +10,22 @@ import (
 
 // Config represents the main configuration structure
 type Config struct {
-	ProjectsRoot string        `yaml:"projects_root"`
-	LLM          LLMConfig     `yaml:"llm"`
-	Safety       SafetyConfig  `yaml:"safety"`
-	SSH          SSHConfig     `yaml:"ssh"`
-	Storage      StorageConfig `yaml:"storage"`
-	Browser      BrowserConfig `yaml:"browser"`
+	ProjectsRoot string              `yaml:"projects_root"`
+	LLM          LLMConfig           `yaml:"llm"`
+	Safety       SafetyConfig        `yaml:"safety"`
+	SSH          SSHConfig           `yaml:"ssh"`
+	Storage      StorageConfig       `yaml:"storage"`
+	Browser      BrowserConfig       `yaml:"browser"`
+	Isolation    IsolationConfig     `yaml:"isolation"`
+	Engine       EngineRuntimeConfig `yaml:"engine"`
 }
 
 // LLMConfig holds LLM provider configuration
 type LLMConfig struct {
-	Provider    string  `yaml:"provider"` // "openai", "claude", "ollama"
-	Model       string  `yaml:"model"`    // e.g., "qwen2.5:32b", "gpt-4"
-	BaseURL     string  `yaml:"base_url"` // For Ollama or custom endpoints
-	APIKey      string  `yaml:"api_key"`  // For OpenAI/Claude
+	Provider    string  `yaml:"provider"`
+	Model       string  `yaml:"model"`
+	BaseURL     string  `yaml:"base_url"`
+	APIKey      string  `yaml:"api_key"`
 	Temperature float64 `yaml:"temperature"`
 	MaxTokens   int     `yaml:"max_tokens"`
 }
@@ -44,9 +46,9 @@ type SSHConfig struct {
 
 // StorageConfig defines where state is stored
 type StorageConfig struct {
-	Type string `yaml:"type"` // "sqlite", "postgres"
-	Path string `yaml:"path"` // For sqlite
-	DSN  string `yaml:"dsn"`  // For postgres
+	Type string `yaml:"type"`
+	Path string `yaml:"path"`
+	DSN  string `yaml:"dsn"`
 }
 
 // BrowserConfig holds browser automation configuration
@@ -58,12 +60,41 @@ type BrowserConfig struct {
 	BrowserDomains []string `yaml:"browser_domains"`
 }
 
+// IsolationConfig controls execution isolation for dangerous operations.
+type IsolationConfig struct {
+	Enabled          bool         `yaml:"enabled"`
+	Docker           DockerConfig `yaml:"docker"`
+	MaxParallel      int          `yaml:"max_parallel"`
+	RequireDockerFor []string     `yaml:"require_docker_for"`
+}
+
+// DockerConfig holds Docker sandbox settings.
+type DockerConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	Image        string   `yaml:"image"`
+	Network      string   `yaml:"network"`
+	MemoryLimit  string   `yaml:"memory_limit"`
+	CPULimit     string   `yaml:"cpu_limit"`
+	ReadOnlyRoot bool     `yaml:"read_only_root"`
+	WorkdirMount string   `yaml:"workdir_mount"`
+	ExtraArgs    []string `yaml:"extra_args"`
+}
+
+// EngineRuntimeConfig holds engine-level runtime settings.
+type EngineRuntimeConfig struct {
+	MaxLoops       int  `yaml:"max_loops"`
+	MaxRetries     int  `yaml:"max_retries"`
+	EnableReplan   bool `yaml:"enable_replan"`
+	EnableParallel bool `yaml:"enable_parallel"`
+}
+
 // DefaultConfig returns a configuration with sensible defaults
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
+	projectsRoot := filepath.Join(homeDir, "Projects")
 
 	return &Config{
-		ProjectsRoot: filepath.Join(homeDir, "Projects"),
+		ProjectsRoot: projectsRoot,
 		LLM: LLMConfig{
 			Provider:    "ollama",
 			Model:       "qwen2.5:32b",
@@ -72,9 +103,7 @@ func DefaultConfig() *Config {
 			MaxTokens:   4096,
 		},
 		Safety: SafetyConfig{
-			AllowPaths: []string{
-				filepath.Join(homeDir, "Projects"),
-			},
+			AllowPaths: []string{projectsRoot},
 			DenyCommands: []string{
 				"rm -rf /",
 				":(){ :|:& };:",
@@ -97,43 +126,65 @@ func DefaultConfig() *Config {
 			Path: filepath.Join(homeDir, ".config", "octaai", "state.db"),
 		},
 		Browser: BrowserConfig{
-			Enabled:        false, // Disabled by default
+			Enabled:        false,
 			Port:           8765,
 			Token:          "",
 			AutoScreenshot: true,
 			BrowserDomains: []string{},
+		},
+		Isolation: IsolationConfig{
+			Enabled: false,
+			Docker: DockerConfig{
+				Enabled:      false,
+				Image:        "alpine:3.19",
+				Network:      "none",
+				MemoryLimit:  "512m",
+				CPULimit:     "1.0",
+				ReadOnlyRoot: true,
+				WorkdirMount: projectsRoot,
+			},
+			MaxParallel:      3,
+			RequireDockerFor: []string{"command"},
+		},
+		Engine: EngineRuntimeConfig{
+			MaxLoops:       50,
+			MaxRetries:     3,
+			EnableReplan:   true,
+			EnableParallel: true,
 		},
 	}
 }
 
 // LoadConfig loads configuration from a YAML file
 func LoadConfig(path string) (*Config, error) {
-	// Start with defaults
 	cfg := DefaultConfig()
 
-	// If file doesn't exist, return defaults
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return cfg, nil
 	}
 
-	// Read file
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	// Parse YAML
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Expand environment variables in paths
 	cfg.ProjectsRoot = os.ExpandEnv(cfg.ProjectsRoot)
 	cfg.SSH.KnownHostsFile = os.ExpandEnv(cfg.SSH.KnownHostsFile)
 	cfg.SSH.DefaultKeyPath = os.ExpandEnv(cfg.SSH.DefaultKeyPath)
 	cfg.Storage.Path = os.ExpandEnv(cfg.Storage.Path)
+	cfg.Isolation.Docker.WorkdirMount = os.ExpandEnv(cfg.Isolation.Docker.WorkdirMount)
 
-	// Read API key from environment if not in config
+	if cfg.Isolation.Docker.WorkdirMount == "" {
+		cfg.Isolation.Docker.WorkdirMount = cfg.ProjectsRoot
+	}
+	if cfg.Isolation.MaxParallel <= 0 {
+		cfg.Isolation.MaxParallel = 3
+	}
+
 	if cfg.LLM.APIKey == "" {
 		if cfg.LLM.Provider == "openai" {
 			cfg.LLM.APIKey = os.Getenv("OPENAI_API_KEY")
@@ -147,19 +198,16 @@ func LoadConfig(path string) (*Config, error) {
 
 // SaveConfig saves the configuration to a YAML file
 func SaveConfig(cfg *Config, path string) error {
-	// Ensure directory exists
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Marshal to YAML
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write file
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
