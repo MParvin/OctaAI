@@ -43,13 +43,21 @@ func (m *Manager) CheckURL(rawURL string) CheckResult {
 		}
 	}
 
-	if ip := net.ParseIP(host); ip != nil && isBlockedIP(ip) {
-		return CheckResult{
-			Decision: DecisionDeny,
-			Reason:   "private or link-local URLs are not allowed",
+	if ip := net.ParseIP(host); ip != nil {
+		if isBlockedIP(ip) {
+			return CheckResult{Decision: DecisionDeny, Reason: "private or link-local URLs are not allowed"}
+		}
+	} else {
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return CheckResult{Decision: DecisionDeny, Reason: fmt.Sprintf("failed to resolve host %q: %v", host, err)}
+		}
+		for _, resolved := range ips {
+			if isBlockedIP(resolved) {
+				return CheckResult{Decision: DecisionDeny, Reason: "private or link-local URLs are not allowed"}
+			}
 		}
 	}
-
 	if len(m.cfg.Safety.AllowHTTPHosts) > 0 {
 		allowed := false
 		for _, pattern := range m.cfg.Safety.AllowHTTPHosts {
