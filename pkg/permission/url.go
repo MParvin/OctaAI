@@ -85,13 +85,18 @@ func (m *Manager) CheckBrowserDomain(rawURL string) CheckResult {
 	}
 
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" {
+	if err != nil || u.Scheme == "" || u.Host == "" {
 		return CheckResult{
 			Decision: DecisionDeny,
 			Reason:   fmt.Sprintf("invalid browser URL: %q", rawURL),
 		}
 	}
-
+	if scheme := strings.ToLower(u.Scheme); scheme != "http" && scheme != "https" {
+		return CheckResult{
+			Decision: DecisionDeny,
+			Reason:   fmt.Sprintf("unsupported browser URL scheme: %s", scheme),
+		}
+	}
 	host := strings.ToLower(u.Hostname())
 	for _, domain := range m.cfg.Browser.BrowserDomains {
 		domain = strings.ToLower(domain)
