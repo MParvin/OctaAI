@@ -15,9 +15,9 @@ import (
 
 // Plan is the output of the planner.
 type Plan struct {
-	ProjectName string         `json:"project_name,omitempty"`
-	NeedsProject bool          `json:"needs_project"`
-	Tasks       []*storage.Task `json:"tasks"`
+	ProjectName  string          `json:"project_name,omitempty"`
+	NeedsProject bool            `json:"needs_project"`
+	Tasks        []*storage.Task `json:"tasks"`
 }
 
 // Planner creates actionable task plans from goals.
@@ -28,19 +28,25 @@ type Planner interface {
 
 // LLMPlanner uses an LLM to decompose goals into tasks.
 type LLMPlanner struct {
-	llm    llm.Provider
-	tools  *tools.Registry
-	memory *memory.Manager
+	llm         llm.Provider
+	tools       *tools.Registry
+	memory      *memory.Manager
+	maxAttempts int
 }
 
 // NewLLMPlanner creates an LLM-backed planner.
-func NewLLMPlanner(provider llm.Provider, registry *tools.Registry, mem *memory.Manager) *LLMPlanner {
-	return &LLMPlanner{llm: provider, tools: registry, memory: mem}
+func NewLLMPlanner(provider llm.Provider, registry *tools.Registry, mem *memory.Manager, maxAttempts int) *LLMPlanner {
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+	return &LLMPlanner{llm: provider, tools: registry, memory: mem, maxAttempts: maxAttempts}
 }
 
 // Plan generates tasks for a goal.
 func (p *LLMPlanner) Plan(ctx context.Context, goal *storage.Goal, memoryContext string) (*Plan, error) {
-	projectName, needsProject := p.extractProjectInfo(ctx, goal)
+	llmName, llmNeeds := p.extractProjectInfo(ctx, goal)
+	needsProject := goalNeedsProject(goal.Description, goal.ProjectName) || llmNeeds
+	projectName, needsProject := resolveProjectName(goal.Description, goal.ProjectName, llmName, needsProject)
 
 	now := time.Now()
 	plan := &Plan{
@@ -58,7 +64,7 @@ func (p *LLMPlanner) Plan(ctx context.Context, goal *storage.Goal, memoryContext
 			ToolArgs:     map[string]interface{}{"action": "create_directory", "path": projectName},
 			CreatedAt:    now,
 			UpdatedAt:    now,
-			MaxAttempts:  3,
+			MaxAttempts:  p.maxAttempts,
 			Dependencies: []string{},
 		})
 		plan.Tasks = append(plan.Tasks, &storage.Task{
@@ -68,8 +74,19 @@ func (p *LLMPlanner) Plan(ctx context.Context, goal *storage.Goal, memoryContext
 			Status:       "pending",
 			CreatedAt:    now,
 			UpdatedAt:    now,
-			MaxAttempts:  3,
+			MaxAttempts:  p.maxAttempts,
 			Dependencies: []string{fmt.Sprintf("task_%s_1", goal.ID)},
+		})
+	} else if needsProject {
+		plan.Tasks = append(plan.Tasks, &storage.Task{
+			ID:           fmt.Sprintf("task_%s_1", goal.ID),
+			GoalID:       goal.ID,
+			Description:  fmt.Sprintf("Complete goal: %s", goal.Description),
+			Status:       "pending",
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			MaxAttempts:  p.maxAttempts,
+			Dependencies: []string{},
 		})
 	} else {
 		plan.Tasks = append(plan.Tasks, &storage.Task{
@@ -79,13 +96,16 @@ func (p *LLMPlanner) Plan(ctx context.Context, goal *storage.Goal, memoryContext
 			Status:       "pending",
 			CreatedAt:    now,
 			UpdatedAt:    now,
-			MaxAttempts:  3,
+			MaxAttempts:  p.maxAttempts,
 			Dependencies: []string{},
 		})
 	}
 
 	if memoryContext != "" {
 		p.memory.Remember(goal.ID, "plan_context", memoryContext, "planner")
+	}
+	if projectName != "" {
+		p.memory.Remember(goal.ID, "project_name", projectName, "planner")
 	}
 
 	return plan, nil
@@ -118,7 +138,7 @@ PROJECT_NAME: <name or NONE>`, goal.Description)
 		if len(parts) >= 2 {
 			name := strings.TrimSpace(parts[1])
 			if name != "NONE" && name != "" {
-				name = strings.ToLower(strings.ReplaceAll(name, " ", "-"))
+				name = SanitizeProjectName(name)
 				return name, true
 			}
 		}

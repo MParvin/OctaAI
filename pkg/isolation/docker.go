@@ -3,7 +3,7 @@ package isolation
 import (
 	"fmt"
 	"os/exec"
-	"strings"
+	"path/filepath"
 
 	"github.com/mparvin/octaai/pkg/config"
 )
@@ -40,7 +40,7 @@ func (d *Docker) ShouldIsolate(toolName string) bool {
 	return false
 }
 
-// WrapCommand builds a docker run invocation for a shell command.
+// WrapCommand builds a docker run invocation argv for a shell command.
 func (d *Docker) WrapCommand(cwd, command string) ([]string, error) {
 	if command == "" {
 		return nil, fmt.Errorf("empty command")
@@ -54,7 +54,10 @@ func (d *Docker) WrapCommand(cwd, command string) ([]string, error) {
 
 	containerWorkdir := "/workspace"
 	if cwd != "" {
-		containerWorkdir = "/workspace/" + strings.TrimPrefix(strings.TrimPrefix(cwd, mount), "/")
+		resolved := config.ResolveProjectPath(d.cfg, cwd)
+		if rel, err := filepath.Rel(mount, resolved); err == nil && rel != "." {
+			containerWorkdir = "/workspace/" + filepath.ToSlash(rel)
+		}
 	}
 
 	args := []string{"run", "--rm"}
@@ -78,7 +81,7 @@ func (d *Docker) WrapCommand(cwd, command string) ([]string, error) {
 	return append([]string{"docker"}, args...), nil
 }
 
-// WrapArgs rewrites command tool args to execute inside Docker when applicable.
+// WrapArgs annotates command tool args for Docker isolation without destroying argv boundaries.
 func (d *Docker) WrapArgs(toolName string, args map[string]interface{}) (map[string]interface{}, bool, error) {
 	if !d.ShouldIsolate(toolName) {
 		return args, false, nil
@@ -95,12 +98,11 @@ func (d *Docker) WrapArgs(toolName string, args map[string]interface{}) (map[str
 		return nil, false, err
 	}
 
-	wrapped := make(map[string]interface{}, len(args))
+	wrapped := make(map[string]interface{}, len(args)+2)
 	for k, v := range args {
 		wrapped[k] = v
 	}
-	wrapped["command"] = strings.Join(dockerCmd, " ")
-	wrapped["cwd"] = d.cfg.ProjectsRoot
+	wrapped["_docker_argv"] = dockerCmd
 	wrapped["_isolated"] = true
 
 	return wrapped, true, nil

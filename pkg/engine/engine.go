@@ -70,7 +70,7 @@ func NewEngine(
 	mem := memory.NewManager(store)
 	logger := observability.NewLogger(store)
 	perm := permission.NewManager(cfg, store)
-	pl := planner.NewLLMPlanner(llmProvider, toolRegistry, mem)
+	pl := planner.NewLLMPlanner(llmProvider, toolRegistry, mem, cfg.Engine.MaxRetries)
 
 	ecfg := DefaultEngineConfig()
 	if cfg.Engine.MaxLoops > 0 {
@@ -110,6 +110,13 @@ func (e *Engine) ProcessGoal(ctx context.Context, goalID string) error {
 		return fmt.Errorf("failed to get goal: %w", err)
 	}
 
+	switch goal.State {
+	case StateCompleted, StateFailed:
+		return nil
+	case StateWaitingForApproval, StateBlocked:
+		return fmt.Errorf("goal %s is in state %s and cannot be processed", goalID, goal.State)
+	}
+
 	e.logger.RecordTimeline(observability.TimelineEvent{
 		Timestamp: time.Now(),
 		GoalID:    goalID,
@@ -117,12 +124,24 @@ func (e *Engine) ProcessGoal(ctx context.Context, goalID string) error {
 		Detail:    goal.Description,
 	})
 
-	if err := e.transitionGoal(goal, StatePlanning); err != nil {
-		return err
+	existingTasks, _ := e.store.GetTasksByGoal(goalID)
+	for i := range existingTasks {
+		if existingTasks[i].Status == "running" {
+			existingTasks[i].Status = "pending"
+			existingTasks[i].UpdatedAt = time.Now()
+			_ = e.store.UpdateTask(&existingTasks[i])
+		}
 	}
 
-	existingTasks, _ := e.store.GetTasksByGoal(goalID)
 	if len(existingTasks) == 0 {
+		if goal.State == StateExecuting || goal.State == StateEvaluating {
+			return e.failGoal(goal, fmt.Errorf("no tasks found for goal in state %s", goal.State))
+		}
+		if goal.State != StatePlanning {
+			if err := e.transitionGoal(goal, StatePlanning); err != nil {
+				return err
+			}
+		}
 		memCtx := e.memory.SearchContext(goalID, goal.Description, 10)
 		plan, err := e.planner.Plan(ctx, goal, memCtx)
 		if err != nil {
@@ -138,9 +157,28 @@ func (e *Engine) ProcessGoal(ctx context.Context, goalID string) error {
 		e.logger.Info(goalID, fmt.Sprintf("Resuming with %d existing task(s)", len(existingTasks)), nil)
 	}
 
-	if err := e.transitionGoal(goal, StateExecuting); err != nil {
-		return err
+	if goal.State == StateEvaluating {
+		retry, err := e.runGoalEvaluation(ctx, goal)
+		if err != nil {
+			return err
+		}
+		if retry {
+			e.loopCount = 0
+			goto executionLoop
+		}
+		return nil
 	}
+
+	if goal.State == StateRetrying {
+		if err := e.transitionGoal(goal, StateExecuting); err != nil {
+			return err
+		}
+	} else if goal.State != StateExecuting {
+		if err := e.transitionGoal(goal, StateExecuting); err != nil {
+			return err
+		}
+	}
+	e.persistCheckpoint(goalID, goal.State, e.loopCount)
 
 executionLoop:
 	for e.loopCount < e.engineCfg.MaxLoops {
@@ -177,6 +215,8 @@ executionLoop:
 			e.logger.Error(goalID, fmt.Sprintf("Task execution error: %v", err), nil)
 		}
 
+		e.persistCheckpoint(goalID, goal.State, e.loopCount)
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -188,9 +228,25 @@ executionLoop:
 		return e.failGoal(goal, fmt.Errorf("exceeded maximum loop count"))
 	}
 
-	if err := e.transitionGoal(goal, StateEvaluating); err != nil {
+	retry, err := e.runGoalEvaluation(ctx, goal)
+	if err != nil {
 		return err
 	}
+	if retry {
+		e.loopCount = 0
+		goto executionLoop
+	}
+	return nil
+}
+
+func (e *Engine) runGoalEvaluation(ctx context.Context, goal *storage.Goal) (bool, error) {
+	goalID := goal.ID
+	if goal.State != StateEvaluating {
+		if err := e.transitionGoal(goal, StateEvaluating); err != nil {
+			return false, err
+		}
+	}
+	e.persistCheckpoint(goalID, goal.State, e.loopCount)
 
 	steps, _ := e.store.GetStepsByGoal(goalID)
 	stepPtrs := make([]*execution.StepView, len(steps))
@@ -200,14 +256,14 @@ executionLoop:
 
 	verdict, err := e.evaluator.EvaluateGoal(ctx, goal.Description, stepPtrs)
 	if err != nil {
-		return e.failGoal(goal, err)
+		return false, e.failGoal(goal, err)
 	}
 
 	switch verdict.Result {
 	case evaluator.RetryRequired:
 		if e.engineCfg.EnableReplan {
 			if err := e.transitionGoal(goal, StateRetrying); err != nil {
-				return err
+				return false, err
 			}
 			tasks, _ := e.store.GetTasksByGoal(goalID)
 			newTasks, replanErr := e.planner.Replan(ctx, goal, verdict.Detail, e.memory.SearchContext(goalID, goal.Description, 5), tasks)
@@ -217,16 +273,15 @@ executionLoop:
 				}
 				e.logger.Info(goalID, fmt.Sprintf("Replanned with %d new task(s)", len(newTasks)), nil)
 				if err := e.transitionGoal(goal, StateExecuting); err != nil {
-					return err
+					return false, err
 				}
-				e.loopCount = 0
-				goto executionLoop
+				return true, nil
 			}
 			e.logger.Warn(goalID, fmt.Sprintf("Replan failed: %v", replanErr), nil)
 		}
-		return e.failGoal(goal, fmt.Errorf("retry required: %s", verdict.Detail))
+		return false, e.failGoal(goal, fmt.Errorf("retry required: %s", verdict.Detail))
 	case evaluator.Fatal:
-		return e.failGoal(goal, fmt.Errorf("evaluation failed: %s", verdict.Detail))
+		return false, e.failGoal(goal, fmt.Errorf("evaluation failed: %s", verdict.Detail))
 	}
 
 	now := time.Now()
@@ -240,7 +295,13 @@ executionLoop:
 		Event:     "goal_completed",
 		Detail:    goal.Result,
 	})
-	return e.store.UpdateGoal(goal)
+	return false, e.store.UpdateGoal(goal)
+}
+
+func (e *Engine) persistCheckpoint(goalID string, state GoalState, stepIndex int) {
+	if _, err := e.SaveCheckpoint(goalID, state, stepIndex); err != nil {
+		e.logger.Warn(goalID, fmt.Sprintf("checkpoint save failed: %v", err), nil)
+	}
 }
 
 func (e *Engine) transitionGoal(goal *storage.Goal, to GoalState) error {
@@ -253,7 +314,7 @@ func (e *Engine) transitionGoal(goal *storage.Goal, to GoalState) error {
 		Timestamp: time.Now(),
 		GoalID:    goal.ID,
 		Event:     "state_transition",
-		Detail:    fmt.Sprintf("%s", to),
+		Detail:    string(to),
 	})
 	return e.store.UpdateGoal(goal)
 }
@@ -378,14 +439,18 @@ func (e *Engine) executeToolTask(ctx context.Context, goal *storage.Goal, task *
 		return e.handleStepFailure(task, step, output, err)
 	}
 
-	verdict, _ := e.evaluator.Evaluate(ctx, step.View())
+	return e.finalizeStepExecution(ctx, goal, task, step, output, nil)
+}
+
+func (e *Engine) finalizeStepExecution(ctx context.Context, goal *storage.Goal, task *storage.Task, step *ExecutionStep, output *StepOutput, resultOverride *string) error {
 	stepOutput := output
 	if stepOutput == nil {
 		stepOutput = &StepOutput{}
 	}
+
+	verdict, _ := e.evaluator.Evaluate(ctx, step.ViewWithOutput(stepOutput))
 	step.MarkCompleted(stepOutput, ValidationResult(verdict.Result), verdict.Detail)
 	_ = e.store.UpdateStep(stepToStorage(step))
-
 	e.memory.RecordStepOutcome(goal.ID, step.ID, task.Description, stepOutput.Output, stepOutput.Success)
 
 	if verdict.Result == evaluator.RetryRequired && task.Attempts < task.MaxAttempts {
@@ -399,7 +464,12 @@ func (e *Engine) executeToolTask(ctx context.Context, goal *storage.Goal, task *
 	}
 
 	task.Status = "completed"
-	task.Result = stepOutput.Output
+	if resultOverride != nil {
+		task.Result = *resultOverride
+	} else {
+		task.Result = stepOutput.Output
+	}
+	task.Error = ""
 	task.UpdatedAt = time.Now()
 	return e.store.UpdateTask(task)
 }
@@ -459,28 +529,7 @@ func (e *Engine) executeLLMTask(ctx context.Context, goal *storage.Goal, task *s
 		return e.handleStepFailure(task, step, output, err)
 	}
 
-	verdict, _ := e.evaluator.Evaluate(ctx, step.View())
-	if output == nil {
-		output = &StepOutput{}
-	}
-	step.MarkCompleted(output, ValidationResult(verdict.Result), verdict.Detail)
-	_ = e.store.UpdateStep(stepToStorage(step))
-	e.memory.RecordStepOutcome(goal.ID, step.ID, task.Description, output.Output, output.Success)
-
-	if verdict.Result == evaluator.RetryRequired && task.Attempts < task.MaxAttempts {
-		task.Status = "pending"
-		task.Error = verdict.Detail
-		task.UpdatedAt = time.Now()
-		return e.store.UpdateTask(task)
-	}
-	if verdict.Result == evaluator.Fatal || !output.Success {
-		return e.failTask(task, fmt.Errorf("%s", verdict.Detail))
-	}
-
-	task.Result = output.Output
-	task.Status = "completed"
-	task.UpdatedAt = time.Now()
-	return e.store.UpdateTask(task)
+	return e.finalizeStepExecution(ctx, goal, task, step, output, nil)
 }
 
 func (e *Engine) handleStepFailure(task *storage.Task, step *ExecutionStep, output *StepOutput, err error) error {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mparvin/octaai/pkg/config"
+	"github.com/mparvin/octaai/pkg/permission"
 )
 
 // CommandTool executes shell commands
@@ -62,7 +63,6 @@ func (t *CommandTool) Execute(ctx context.Context, args map[string]interface{}) 
 		return nil, fmt.Errorf("command is required")
 	}
 
-	// Check if command is denied
 	if t.isCommandDenied(cmdStr) {
 		return &ToolResult{
 			Success: false,
@@ -70,27 +70,22 @@ func (t *CommandTool) Execute(ctx context.Context, args map[string]interface{}) 
 		}, nil
 	}
 
-	// Parse timeout
 	timeout := 300 * time.Second
 	if timeoutVal, ok := args["timeout"].(float64); ok {
 		timeout = time.Duration(timeoutVal) * time.Second
 	}
 
-	// Create context with timeout
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Parse command
 	parts := strings.Fields(cmdStr)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty command")
 	}
 
-	// Create command
 	cmd := exec.CommandContext(cmdCtx, parts[0], parts[1:]...)
 	cmd.Dir = t.resolvePath(cwd)
 
-	// Execute command
 	output, err := cmd.CombinedOutput()
 
 	exitCode := 0
@@ -105,10 +100,8 @@ func (t *CommandTool) Execute(ctx context.Context, args map[string]interface{}) 
 		}
 	}
 
-	success := exitCode == 0
-
 	return &ToolResult{
-		Success: success,
+		Success: exitCode == 0,
 		Output:  string(output),
 		Data: map[string]interface{}{
 			"exit_code": exitCode,
@@ -119,13 +112,13 @@ func (t *CommandTool) Execute(ctx context.Context, args map[string]interface{}) 
 }
 
 func (t *CommandTool) resolvePath(path string) string {
-	// Similar to filesystem tool
-	return path
+	return config.ResolveProjectPath(t.cfg, path)
 }
 
 func (t *CommandTool) isCommandDenied(cmdStr string) bool {
+	normalized := permission.NormalizeCommand(cmdStr)
 	for _, denied := range t.cfg.Safety.DenyCommands {
-		if strings.Contains(cmdStr, denied) {
+		if strings.Contains(normalized, permission.NormalizeCommand(denied)) {
 			return true
 		}
 	}

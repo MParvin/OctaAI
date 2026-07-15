@@ -60,7 +60,7 @@ Respond with ONLY the task description (one line, no markdown).`, goal.Descripti
 		Status:       "pending",
 		CreatedAt:    now,
 		UpdatedAt:    now,
-		MaxAttempts:  3,
+		MaxAttempts:  p.maxAttempts,
 		Dependencies: deps,
 	}
 

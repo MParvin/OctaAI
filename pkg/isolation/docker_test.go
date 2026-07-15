@@ -46,6 +46,30 @@ func TestShouldIsolate(t *testing.T) {
 	}
 }
 
+func TestWrapArgsPreservesArgv(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Isolation.Enabled = true
+	cfg.Isolation.Docker.Enabled = true
+
+	d := NewDocker(cfg)
+	args := map[string]interface{}{
+		"cwd":     "myapp",
+		"command": "go test ./...",
+	}
+	wrapped, ok, err := d.WrapArgs("command", args)
+	if err != nil || !ok {
+		t.Fatalf("expected wrapped args, got ok=%v err=%v", ok, err)
+	}
+	argv, exists := wrapped["_docker_argv"].([]string)
+	if !exists || len(argv) == 0 || argv[0] != "docker" {
+		t.Fatalf("expected docker argv slice, got %v", wrapped["_docker_argv"])
+	}
+	rewritten, ok := wrapped["command"].(string)
+	if !ok || rewritten != "go test ./..." {
+		t.Fatalf("expected original command preserved, got %v", wrapped["command"])
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || indexOf(s, sub) >= 0)
 }

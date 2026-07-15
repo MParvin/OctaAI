@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -33,6 +34,7 @@ type LLMConfig struct {
 // SafetyConfig defines safety constraints
 type SafetyConfig struct {
 	AllowPaths             []string `yaml:"allow_paths"`
+	AllowHTTPHosts         []string `yaml:"allow_http_hosts"`
 	DenyCommands           []string `yaml:"deny_commands"`
 	RequireConfirmationFor []string `yaml:"require_confirmation_for"`
 }
@@ -172,11 +174,14 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	cfg.ProjectsRoot = os.ExpandEnv(cfg.ProjectsRoot)
-	cfg.SSH.KnownHostsFile = os.ExpandEnv(cfg.SSH.KnownHostsFile)
-	cfg.SSH.DefaultKeyPath = os.ExpandEnv(cfg.SSH.DefaultKeyPath)
-	cfg.Storage.Path = os.ExpandEnv(cfg.Storage.Path)
-	cfg.Isolation.Docker.WorkdirMount = os.ExpandEnv(cfg.Isolation.Docker.WorkdirMount)
+	cfg.ProjectsRoot = ExpandPath(cfg.ProjectsRoot)
+	for i, p := range cfg.Safety.AllowPaths {
+		cfg.Safety.AllowPaths[i] = ExpandPath(p)
+	}
+	cfg.SSH.KnownHostsFile = ExpandPath(cfg.SSH.KnownHostsFile)
+	cfg.SSH.DefaultKeyPath = ExpandPath(cfg.SSH.DefaultKeyPath)
+	cfg.Storage.Path = ExpandPath(cfg.Storage.Path)
+	cfg.Isolation.Docker.WorkdirMount = ExpandPath(cfg.Isolation.Docker.WorkdirMount)
 
 	if cfg.Isolation.Docker.WorkdirMount == "" {
 		cfg.Isolation.Docker.WorkdirMount = cfg.ProjectsRoot
@@ -213,6 +218,39 @@ func SaveConfig(cfg *Config, path string) error {
 	}
 
 	return nil
+}
+
+// ExpandPath expands environment variables and a leading ~ using the HOME variable.
+func ExpandPath(path string) string {
+	path = os.ExpandEnv(path)
+	if path == "" {
+		return path
+	}
+
+	home := os.Getenv("HOME")
+	if home == "" {
+		home, _ = os.UserHomeDir()
+	}
+	if home == "" {
+		return path
+	}
+
+	if path == "~" {
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+// ResolveProjectPath expands ~ and env vars, then resolves relative paths against projects_root.
+func ResolveProjectPath(cfg *Config, path string) string {
+	path = ExpandPath(path)
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(cfg.ProjectsRoot, path)
 }
 
 // ConfigPath returns the default configuration file path

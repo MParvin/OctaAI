@@ -64,7 +64,7 @@ func (t *FilesystemTool) Execute(ctx context.Context, args map[string]interface{
 	}
 
 	// Resolve path
-	fullPath := t.resolvePath(pathStr)
+	fullPath := config.ResolveProjectPath(t.cfg, pathStr)
 
 	// Check if path is allowed
 	if !t.isPathAllowed(fullPath) {
@@ -90,13 +90,6 @@ func (t *FilesystemTool) Execute(ctx context.Context, args map[string]interface{
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
-}
-
-func (t *FilesystemTool) resolvePath(path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(t.cfg.ProjectsRoot, path)
 }
 
 func (t *FilesystemTool) isPathAllowed(path string) bool {

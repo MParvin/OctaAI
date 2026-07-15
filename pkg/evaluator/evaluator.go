@@ -28,8 +28,8 @@ type Evaluator interface {
 
 // CompositeEvaluator runs multiple evaluators in sequence.
 type CompositeEvaluator struct {
-	evaluators      []Evaluator
-	goalEvaluators  []GoalEvaluator
+	evaluators     []Evaluator
+	goalEvaluators []GoalEvaluator
 }
 
 // NewComposite creates an evaluator chain.

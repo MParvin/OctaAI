@@ -2,6 +2,7 @@ package permission
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/mparvin/octaai/pkg/approval"
@@ -26,8 +27,8 @@ type CheckResult struct {
 
 // Manager enforces safety policies before tool execution.
 type Manager struct {
-	cfg      *config.Config
-	store    storage.Storage
+	cfg       *config.Config
+	store     storage.Storage
 	approvals *approval.Service
 }
 
@@ -45,8 +46,22 @@ func (m *Manager) CheckPath(path string) CheckResult {
 	if len(m.cfg.Safety.AllowPaths) == 0 {
 		return CheckResult{Decision: DecisionAllow}
 	}
+
+	fullPath := config.ResolveProjectPath(m.cfg, path)
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		return CheckResult{
+			Decision: DecisionDeny,
+			Reason:   fmt.Sprintf("invalid path %q: %v", path, err),
+		}
+	}
+
 	for _, allowed := range m.cfg.Safety.AllowPaths {
-		if strings.HasPrefix(path, allowed) || strings.HasPrefix(allowed, path) {
+		allowedAbs, err := filepath.Abs(allowed)
+		if err != nil {
+			continue
+		}
+		if absPath == allowedAbs || strings.HasPrefix(absPath, allowedAbs+string(filepath.Separator)) {
 			return CheckResult{Decision: DecisionAllow}
 		}
 	}
@@ -58,8 +73,10 @@ func (m *Manager) CheckPath(path string) CheckResult {
 
 // CheckCommand verifies a shell command against deny/require lists.
 func (m *Manager) CheckCommand(command string) CheckResult {
+	normalized := NormalizeCommand(command)
+
 	for _, denied := range m.cfg.Safety.DenyCommands {
-		if strings.Contains(command, denied) {
+		if strings.Contains(normalized, NormalizeCommand(denied)) {
 			return CheckResult{
 				Decision: DecisionDeny,
 				Reason:   fmt.Sprintf("command matches denied pattern: %q", denied),
@@ -67,7 +84,7 @@ func (m *Manager) CheckCommand(command string) CheckResult {
 		}
 	}
 	for _, confirm := range m.cfg.Safety.RequireConfirmationFor {
-		if strings.Contains(command, confirm) {
+		if strings.Contains(normalized, NormalizeCommand(confirm)) {
 			return CheckResult{
 				Decision: DecisionRequireApproval,
 				Reason:   fmt.Sprintf("command requires approval: %q", confirm),
@@ -88,19 +105,91 @@ func (m *Manager) CheckTool(goalID, taskID, toolName string, args map[string]int
 	switch toolName {
 	case "command":
 		cmd, _ := args["command"].(string)
-		return m.CheckCommand(cmd)
+		if result := m.CheckCommand(cmd); result.Decision != DecisionAllow {
+			return result
+		}
+		if cwd, ok := args["cwd"].(string); ok && cwd != "" {
+			return m.CheckPath(cwd)
+		}
+		return CheckResult{Decision: DecisionAllow}
+
 	case "filesystem":
 		path, _ := args["path"].(string)
 		if path != "" {
 			return m.CheckPath(path)
 		}
+
+	case "git":
+		path, _ := args["path"].(string)
+		if path == "" {
+			return CheckResult{Decision: DecisionDeny, Reason: "git path is required"}
+		}
+		if result := m.CheckPath(path); result.Decision != DecisionAllow {
+			return result
+		}
+		action, _ := args["action"].(string)
+		if action == "push" {
+			return CheckResult{
+				Decision: DecisionRequireApproval,
+				Reason:   "git push requires approval",
+			}
+		}
+		if action == "clone" {
+			url, _ := args["url"].(string)
+			if strings.HasPrefix(strings.TrimSpace(url), "-") {
+				return CheckResult{
+					Decision: DecisionDeny,
+					Reason:   "git clone URL cannot start with '-'",
+				}
+			}
+			if result := m.CheckURL(url); result.Decision != DecisionAllow {
+				return result
+			}
+		}
+		return CheckResult{Decision: DecisionAllow}
+
+	case "http":
+		url, _ := args["url"].(string)
+		if url == "" {
+			return CheckResult{Decision: DecisionDeny, Reason: "http url is required"}
+		}
+		return m.CheckURL(url)
+
+	case "browser":
+		action, _ := args["action"].(string)
+		if action == "execute" {
+			return CheckResult{
+				Decision: DecisionRequireApproval,
+				Reason:   "browser JavaScript execution requires approval",
+			}
+		}
+		if action == "screenshot" {
+			if outputPath, ok := args["output_path"].(string); ok && outputPath != "" {
+				return m.CheckPath(outputPath)
+			}
+		}
+		if action == "navigate" {
+			url, _ := args["url"].(string)
+			if url == "" {
+				return CheckResult{Decision: DecisionDeny, Reason: "browser navigate requires url"}
+			}
+			return m.CheckBrowserDomain(url)
+		}
+		return CheckResult{Decision: DecisionAllow}
+
 	case "ssh":
+		if localPath, ok := args["local_path"].(string); ok && localPath != "" {
+			if result := m.CheckPath(localPath); result.Decision != DecisionAllow {
+				return result
+			}
+		}
 		return CheckResult{
 			Decision: DecisionRequireApproval,
 			Reason:   "remote SSH execution requires approval",
 		}
 	}
-	return CheckResult{Decision: DecisionAllow}
+
+	return CheckResult{Decision: DecisionDeny, Reason: fmt.Sprintf("unknown tool: %s", toolName)}
 }
 
 // Approvals exposes the approval service.

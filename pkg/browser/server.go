@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +25,29 @@ type Server struct {
 	server    *http.Server
 }
 
-// NewServer creates a new WebSocket server for browser connections
+// allowedOrigin reports whether a WebSocket Origin header is permitted.
+func allowedOrigin(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	allowedPrefixes := []string{
+		"moz-extension://",
+		"chrome-extension://",
+		"http://localhost",
+		"http://127.0.0.1",
+		"https://localhost",
+		"https://127.0.0.1",
+	}
+	for _, prefix := range allowedPrefixes {
+		if strings.HasPrefix(origin, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// NewServer creates a new WebSocket server for browser connections.
+// token must be non-empty; callers should generate one before starting the server.
 func NewServer(addr string, token string) *Server {
 	s := &Server{
 		addr:    addr,
@@ -32,8 +55,7 @@ func NewServer(addr string, token string) *Server {
 		clients: make(map[string]*Client),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				// Allow connections from browser extensions
-				return true
+				return allowedOrigin(r.Header.Get("Origin"))
 			},
 		},
 	}
@@ -52,6 +74,9 @@ func NewServer(addr string, token string) *Server {
 
 // Start starts the WebSocket server
 func (s *Server) Start() error {
+	if s.token == "" {
+		return fmt.Errorf("browser WebSocket token is required")
+	}
 	log.Printf("Starting browser WebSocket server on %s", s.addr)
 	return s.server.ListenAndServe()
 }
@@ -60,7 +85,6 @@ func (s *Server) Start() error {
 func (s *Server) Stop(ctx context.Context) error {
 	log.Println("Stopping browser WebSocket server...")
 
-	// Close all client connections
 	s.clientsMu.Lock()
 	for _, client := range s.clients {
 		client.Close()
@@ -72,22 +96,19 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // handleWebSocket handles WebSocket connection requests
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Check authentication token
 	authToken := r.URL.Query().Get("token")
-	if s.token != "" && authToken != s.token {
+	if authToken != s.token {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		log.Printf("Rejected connection: invalid token")
+		log.Printf("Rejected connection: invalid or missing token")
 		return
 	}
 
-	// Upgrade connection to WebSocket
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v", err)
 		return
 	}
 
-	// Create new client
 	clientID := uuid.New().String()
 	client := NewClient(clientID, conn)
 
@@ -97,7 +118,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("Browser connected: %s (total: %d)", clientID, len(s.clients))
 
-	// Handle client connection
 	go s.handleClient(client)
 }
 
@@ -111,10 +131,8 @@ func (s *Server) handleClient(client *Client) {
 		log.Printf("Browser disconnected: %s (remaining: %d)", client.ID, len(s.clients))
 	}()
 
-	// Start ping routine
 	go client.pingRoutine()
 
-	// Read messages from browser
 	for {
 		var response BrowserResponse
 		err := client.conn.ReadJSON(&response)
@@ -125,7 +143,6 @@ func (s *Server) handleClient(client *Client) {
 			break
 		}
 
-		// Route response to waiting command
 		client.mu.RLock()
 		respChan, exists := client.pendingCmds[response.ID]
 		client.mu.RUnlock()
@@ -154,7 +171,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 // SendCommand sends a command to a specific browser client
@@ -179,7 +196,6 @@ func (s *Server) SendCommandToAny(cmd *BrowserCommand, timeout time.Duration) (*
 		return nil, fmt.Errorf("no browser connected")
 	}
 
-	// Get first available client
 	for _, client := range s.clients {
 		return client.SendCommand(cmd, timeout)
 	}

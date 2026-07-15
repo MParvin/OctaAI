@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/mparvin/octaai/pkg/config"
+	"github.com/mparvin/octaai/pkg/permission"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // SSHTool provides SSH operations for remote servers
@@ -104,7 +106,6 @@ func (t *SSHTool) Execute(ctx context.Context, args map[string]interface{}) (*To
 		port = int(portVal)
 	}
 
-	// Create SSH client
 	client, err := t.createSSHClient(host, port, user, args)
 	if err != nil {
 		return &ToolResult{
@@ -134,12 +135,10 @@ func (t *SSHTool) Execute(ctx context.Context, args map[string]interface{}) (*To
 func (t *SSHTool) createSSHClient(host string, port int, user string, args map[string]interface{}) (*ssh.Client, error) {
 	var authMethods []ssh.AuthMethod
 
-	// Try password authentication
 	if password, ok := args["password"].(string); ok && password != "" {
 		authMethods = append(authMethods, ssh.Password(password))
 	}
 
-	// Try key-based authentication
 	keyPath, ok := args["key_path"].(string)
 	if !ok || keyPath == "" {
 		keyPath = t.cfg.SSH.DefaultKeyPath
@@ -159,20 +158,33 @@ func (t *SSHTool) createSSHClient(host string, port int, user string, args map[s
 		return nil, fmt.Errorf("no authentication method available")
 	}
 
-	config := &ssh.ClientConfig{
+	hostKeyCallback, err := t.hostKeyCallback()
+	if err != nil {
+		return nil, err
+	}
+
+	clientConfig := &ssh.ClientConfig{
 		User:            user,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Implement proper host key checking
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         30 * time.Second,
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	client, err := ssh.Dial("tcp", addr, config)
+	client, err := ssh.Dial("tcp", addr, clientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect: %w", err)
 	}
 
 	return client, nil
+}
+
+func (t *SSHTool) hostKeyCallback() (ssh.HostKeyCallback, error) {
+	knownHostsFile := t.cfg.SSH.KnownHostsFile
+	if knownHostsFile == "" {
+		return nil, fmt.Errorf("SSH known_hosts file is not configured")
+	}
+	return knownhosts.New(knownHostsFile)
 }
 
 func (t *SSHTool) execCommand(client *ssh.Client, command string) (*ToolResult, error) {
@@ -212,7 +224,6 @@ func (t *SSHTool) uploadFile(client *ssh.Client, localPath, remotePath string) (
 		return nil, fmt.Errorf("local_path and remote_path are required")
 	}
 
-	// Read local file
 	content, err := os.ReadFile(localPath)
 	if err != nil {
 		return &ToolResult{
@@ -221,9 +232,8 @@ func (t *SSHTool) uploadFile(client *ssh.Client, localPath, remotePath string) (
 		}, nil
 	}
 
-	// Create remote directory if needed
 	remoteDir := filepath.Dir(remotePath)
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", remoteDir)
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", permission.ShellQuote(remoteDir))
 
 	session, err := client.NewSession()
 	if err != nil {
@@ -232,10 +242,9 @@ func (t *SSHTool) uploadFile(client *ssh.Client, localPath, remotePath string) (
 			Error:   err.Error(),
 		}, nil
 	}
-	session.Run(mkdirCmd)
+	_ = session.Run(mkdirCmd)
 	session.Close()
 
-	// Upload file using SCP protocol
 	session, err = client.NewSession()
 	if err != nil {
 		return &ToolResult{
@@ -245,8 +254,7 @@ func (t *SSHTool) uploadFile(client *ssh.Client, localPath, remotePath string) (
 	}
 	defer session.Close()
 
-	// Simple approach: write content via shell redirection
-	uploadCmd := fmt.Sprintf("cat > %s", remotePath)
+	uploadCmd := fmt.Sprintf("cat > %s", permission.ShellQuote(remotePath))
 	stdin, err := session.StdinPipe()
 	if err != nil {
 		return &ToolResult{
@@ -262,7 +270,7 @@ func (t *SSHTool) uploadFile(client *ssh.Client, localPath, remotePath string) (
 		}, nil
 	}
 
-	stdin.Write(content)
+	_, _ = stdin.Write(content)
 	stdin.Close()
 
 	if err := session.Wait(); err != nil {
@@ -292,8 +300,7 @@ func (t *SSHTool) downloadFile(client *ssh.Client, remotePath, localPath string)
 	}
 	defer session.Close()
 
-	// Read remote file content
-	content, err := session.Output(fmt.Sprintf("cat %s", remotePath))
+	content, err := session.Output(fmt.Sprintf("cat %s", permission.ShellQuote(remotePath)))
 	if err != nil {
 		return &ToolResult{
 			Success: false,
@@ -301,7 +308,6 @@ func (t *SSHTool) downloadFile(client *ssh.Client, remotePath, localPath string)
 		}, nil
 	}
 
-	// Ensure local directory exists
 	localDir := filepath.Dir(localPath)
 	if err := os.MkdirAll(localDir, 0755); err != nil {
 		return &ToolResult{
@@ -310,7 +316,6 @@ func (t *SSHTool) downloadFile(client *ssh.Client, remotePath, localPath string)
 		}, nil
 	}
 
-	// Write to local file
 	if err := os.WriteFile(localPath, content, 0644); err != nil {
 		return &ToolResult{
 			Success: false,

@@ -128,3 +128,14 @@ func (s *ExecutionStep) View() *execution.StepView {
 	}
 	return view
 }
+
+// ViewWithOutput returns a snapshot including runtime output not yet stored on the step.
+func (s *ExecutionStep) ViewWithOutput(output *StepOutput) *execution.StepView {
+	view := s.View()
+	if output != nil {
+		view.Output = output.Output
+		view.Error = output.Error
+		view.Success = output.Success
+	}
+	return view
+}

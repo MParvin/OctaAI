@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -135,17 +136,29 @@ func (s *SQLiteStorage) initSchema() error {
 	`
 
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.migrateSchema()
+}
+
+func (s *SQLiteStorage) migrateSchema() error {
+	_, err := s.db.Exec(`ALTER TABLE goals ADD COLUMN project_name TEXT DEFAULT ''`)
+	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return err
+	}
+	return nil
 }
 
 // CreateGoal implements Storage.CreateGoal
 func (s *SQLiteStorage) CreateGoal(goal *Goal) error {
-	query := `INSERT INTO goals (id, description, state, created_at, updated_at, completed_at, result, error)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO goals (id, description, project_name, state, created_at, updated_at, completed_at, result, error)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := s.db.Exec(query,
 		goal.ID,
 		goal.Description,
+		goal.ProjectName,
 		goal.State,
 		goal.CreatedAt,
 		goal.UpdatedAt,
@@ -158,13 +171,14 @@ func (s *SQLiteStorage) CreateGoal(goal *Goal) error {
 
 // GetGoal implements Storage.GetGoal
 func (s *SQLiteStorage) GetGoal(id string) (*Goal, error) {
-	query := `SELECT id, description, state, created_at, updated_at, completed_at, result, error
+	query := `SELECT id, description, project_name, state, created_at, updated_at, completed_at, result, error
 	          FROM goals WHERE id = ?`
 
 	goal := &Goal{}
 	err := s.db.QueryRow(query, id).Scan(
 		&goal.ID,
 		&goal.Description,
+		&goal.ProjectName,
 		&goal.State,
 		&goal.CreatedAt,
 		&goal.UpdatedAt,
@@ -181,11 +195,12 @@ func (s *SQLiteStorage) GetGoal(id string) (*Goal, error) {
 
 // UpdateGoal implements Storage.UpdateGoal
 func (s *SQLiteStorage) UpdateGoal(goal *Goal) error {
-	query := `UPDATE goals SET description = ?, state = ?, updated_at = ?, 
+	query := `UPDATE goals SET description = ?, project_name = ?, state = ?, updated_at = ?,
 	          completed_at = ?, result = ?, error = ? WHERE id = ?`
 
 	_, err := s.db.Exec(query,
 		goal.Description,
+		goal.ProjectName,
 		goal.State,
 		goal.UpdatedAt,
 		goal.CompletedAt,
@@ -198,7 +213,7 @@ func (s *SQLiteStorage) UpdateGoal(goal *Goal) error {
 
 // ListGoals implements Storage.ListGoals
 func (s *SQLiteStorage) ListGoals() ([]*Goal, error) {
-	query := `SELECT id, description, state, created_at, updated_at, completed_at, result, error
+	query := `SELECT id, description, project_name, state, created_at, updated_at, completed_at, result, error
 	          FROM goals ORDER BY created_at DESC`
 
 	rows, err := s.db.Query(query)
@@ -213,6 +228,7 @@ func (s *SQLiteStorage) ListGoals() ([]*Goal, error) {
 		err := rows.Scan(
 			&goal.ID,
 			&goal.Description,
+			&goal.ProjectName,
 			&goal.State,
 			&goal.CreatedAt,
 			&goal.UpdatedAt,
@@ -234,7 +250,7 @@ func (s *SQLiteStorage) CreateTask(task *Task) error {
 	depsJSON, _ := json.Marshal(task.Dependencies)
 	argsJSON, _ := json.Marshal(task.ToolArgs)
 
-	query := `INSERT INTO tasks (id, goal_id, description, status, dependencies, tool_name, 
+	query := `INSERT INTO tasks (id, goal_id, description, status, dependencies, tool_name,
 	          tool_args, result, error, created_at, updated_at, attempts, max_attempts)
 	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
@@ -258,7 +274,7 @@ func (s *SQLiteStorage) CreateTask(task *Task) error {
 
 // GetTask implements Storage.GetTask
 func (s *SQLiteStorage) GetTask(id string) (*Task, error) {
-	query := `SELECT id, goal_id, description, status, dependencies, tool_name, tool_args, 
+	query := `SELECT id, goal_id, description, status, dependencies, tool_name, tool_args,
 	          result, error, created_at, updated_at, attempts, max_attempts
 	          FROM tasks WHERE id = ?`
 
@@ -285,8 +301,8 @@ func (s *SQLiteStorage) GetTask(id string) (*Task, error) {
 		return nil, err
 	}
 
-	json.Unmarshal([]byte(depsJSON), &task.Dependencies)
-	json.Unmarshal([]byte(argsJSON), &task.ToolArgs)
+	_ = json.Unmarshal([]byte(depsJSON), &task.Dependencies)
+	_ = json.Unmarshal([]byte(argsJSON), &task.ToolArgs)
 
 	return task, nil
 }
@@ -296,8 +312,8 @@ func (s *SQLiteStorage) UpdateTask(task *Task) error {
 	depsJSON, _ := json.Marshal(task.Dependencies)
 	argsJSON, _ := json.Marshal(task.ToolArgs)
 
-	query := `UPDATE tasks SET description = ?, status = ?, dependencies = ?, 
-	          tool_name = ?, tool_args = ?, result = ?, error = ?, updated_at = ?, 
+	query := `UPDATE tasks SET description = ?, status = ?, dependencies = ?,
+	          tool_name = ?, tool_args = ?, result = ?, error = ?, updated_at = ?,
 	          attempts = ?, max_attempts = ? WHERE id = ?`
 
 	_, err := s.db.Exec(query,
@@ -318,7 +334,7 @@ func (s *SQLiteStorage) UpdateTask(task *Task) error {
 
 // GetTasksByGoal implements Storage.GetTasksByGoal
 func (s *SQLiteStorage) GetTasksByGoal(goalID string) ([]Task, error) {
-	query := `SELECT id, goal_id, description, status, dependencies, tool_name, tool_args, 
+	query := `SELECT id, goal_id, description, status, dependencies, tool_name, tool_args,
 	          result, error, created_at, updated_at, attempts, max_attempts
 	          FROM tasks WHERE goal_id = ? ORDER BY created_at ASC`
 
@@ -352,8 +368,8 @@ func (s *SQLiteStorage) GetTasksByGoal(goalID string) ([]Task, error) {
 			return nil, err
 		}
 
-		json.Unmarshal([]byte(depsJSON), &task.Dependencies)
-		json.Unmarshal([]byte(argsJSON), &task.ToolArgs)
+		_ = json.Unmarshal([]byte(depsJSON), &task.Dependencies)
+		_ = json.Unmarshal([]byte(argsJSON), &task.ToolArgs)
 
 		tasks = append(tasks, task)
 	}
