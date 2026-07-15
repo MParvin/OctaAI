@@ -4,8 +4,8 @@ bin/
 *.dll
 *.so
 *.dylib
-octa-agentd
-octa-agent
+/octa-agentd
+/octa-agent
 
 # Test binary, built with `go test -c`
 *.test
@@ -35,6 +35,7 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+config.yaml
 data/
 logs/
 tmp/

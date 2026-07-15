@@ -17,10 +17,10 @@ type Checkpoint struct {
 
 // CheckpointPayload holds serialized execution context.
 type CheckpointPayload struct {
-	GoalState   GoalState        `json:"goal_state"`
-	StepIDs     []string         `json:"step_ids"`
+	GoalState   GoalState         `json:"goal_state"`
+	StepIDs     []string          `json:"step_ids"`
 	Memory      map[string]string `json:"memory,omitempty"`
-	PlanVersion int              `json:"plan_version"`
+	PlanVersion int               `json:"plan_version"`
 }
 
 // NewCheckpoint creates a checkpoint from current engine state.

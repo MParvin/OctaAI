@@ -107,6 +107,8 @@ func (t *GitTool) clone(ctx context.Context, url, destPath string) (*ToolResult,
 		return nil, fmt.Errorf("url is required for clone")
 	}
 
+	destPath = config.ResolveProjectPath(t.cfg, destPath)
+
 	// Ensure parent directory exists
 	parentDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(parentDir, 0755); err != nil {
@@ -133,6 +135,7 @@ func (t *GitTool) clone(ctx context.Context, url, destPath string) (*ToolResult,
 }
 
 func (t *GitTool) init(ctx context.Context, path string) (*ToolResult, error) {
+	path = config.ResolveProjectPath(t.cfg, path)
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return &ToolResult{
 			Success: false,
@@ -158,6 +161,7 @@ func (t *GitTool) init(ctx context.Context, path string) (*ToolResult, error) {
 }
 
 func (t *GitTool) commitAll(ctx context.Context, path, message string) (*ToolResult, error) {
+	path = config.ResolveProjectPath(t.cfg, path)
 	if message == "" {
 		message = "Automated commit by OctaAI"
 	}
@@ -191,6 +195,7 @@ func (t *GitTool) commitAll(ctx context.Context, path, message string) (*ToolRes
 }
 
 func (t *GitTool) push(ctx context.Context, path, remote, branch string) (*ToolResult, error) {
+	path = config.ResolveProjectPath(t.cfg, path)
 	cmd := exec.CommandContext(ctx, "git", "push", remote, branch)
 	cmd.Dir = path
 	output, err := cmd.CombinedOutput()

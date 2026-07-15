@@ -15,6 +15,8 @@ llm:
 safety:
   allow_paths:
     - "/home/user/Projects"
+  # Optional HTTP host allowlist for git clone and http tool (empty = public hosts only, private IPs blocked)
+  allow_http_hosts: []
   deny_commands:
     - "rm -rf /"
     - ":(){ :|:& };:"
@@ -54,3 +56,10 @@ engine:
   max_retries: 3
   enable_replan: true
   enable_parallel: true
+
+browser:
+  enabled: false
+  port: 8765
+  # token is required when enabled; daemon generates one if empty
+  token: ""
+  browser_domains: []

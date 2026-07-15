@@ -11,12 +11,12 @@ import (
 type Capability string
 
 const (
-	CapabilityCoding    Capability = "coding"
-	CapabilityDevOps    Capability = "devops"
-	CapabilityRedTeam   Capability = "redteam"
-	CapabilityK8s       Capability = "kubernetes"
-	CapabilityBrowser   Capability = "browser"
-	CapabilitySSH       Capability = "ssh"
+	CapabilityCoding  Capability = "coding"
+	CapabilityDevOps  Capability = "devops"
+	CapabilityRedTeam Capability = "redteam"
+	CapabilityK8s     Capability = "kubernetes"
+	CapabilityBrowser Capability = "browser"
+	CapabilitySSH     Capability = "ssh"
 )
 
 // Plugin registers tools and capabilities with the core engine.

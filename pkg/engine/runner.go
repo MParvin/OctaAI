@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -45,15 +46,7 @@ func NewRunner(cfg *config.Config, registry *tools.Registry, perm *permission.Ma
 func (r *Runner) Run(ctx context.Context, toolName string, args map[string]interface{}, cfg RunConfig) (*StepOutput, error) {
 	span := r.logger.StartSpan(cfg.GoalID, fmt.Sprintf("tool:%s", toolName), observability.Fields{"step_id": cfg.StepID})
 
-	execArgs := args
-	if wrapped, ok, err := r.docker.WrapArgs(toolName, args); err != nil {
-		r.logger.EndSpan(span)
-		return nil, err
-	} else if ok {
-		execArgs = wrapped
-	}
-
-	check := r.permission.CheckTool(cfg.GoalID, cfg.TaskID, toolName, execArgs)
+	check := r.permission.CheckTool(cfg.GoalID, cfg.TaskID, toolName, args)
 	switch check.Decision {
 	case permission.DecisionDeny:
 		r.logger.EndSpan(span)
@@ -63,10 +56,12 @@ func (r *Runner) Run(ctx context.Context, toolName string, args map[string]inter
 		return nil, fmt.Errorf("approval_required: %s", check.Reason)
 	}
 
-	tool, ok := r.tools.Get(toolName)
-	if !ok {
+	execArgs := args
+	if wrapped, ok, err := r.docker.WrapArgs(toolName, args); err != nil {
 		r.logger.EndSpan(span)
-		return nil, fmt.Errorf("tool not found: %s", toolName)
+		return nil, err
+	} else if ok {
+		execArgs = wrapped
 	}
 
 	runCtx := ctx
@@ -76,7 +71,19 @@ func (r *Runner) Run(ctx context.Context, toolName string, args map[string]inter
 		defer cancel()
 	}
 
-	result, err := tool.Execute(runCtx, execArgs)
+	var result *tools.ToolResult
+	var err error
+
+	if argv, ok := dockerArgv(execArgs); ok {
+		result, err = r.runDockerArgv(runCtx, argv)
+	} else {
+		tool, found := r.tools.Get(toolName)
+		if !found {
+			r.logger.EndSpan(span)
+			return nil, fmt.Errorf("tool not found: %s", toolName)
+		}
+		result, err = tool.Execute(runCtx, execArgs)
+	}
 	r.logger.EndSpan(span)
 
 	if err != nil {
@@ -90,6 +97,11 @@ func (r *Runner) Run(ctx context.Context, toolName string, args map[string]inter
 	}
 	if data, ok := result.Data.(map[string]interface{}); ok {
 		out.Data = data
+	} else if result.Data != nil {
+		r.logger.Warn(cfg.GoalID, "tool returned non-map Data payload", observability.Fields{
+			"tool": toolName,
+			"step": cfg.StepID,
+		})
 	}
 	if execArgs["_isolated"] == true {
 		if out.Data == nil {
@@ -99,6 +111,57 @@ func (r *Runner) Run(ctx context.Context, toolName string, args map[string]inter
 	}
 
 	return out, nil
+}
+
+func dockerArgv(args map[string]interface{}) ([]string, bool) {
+	raw, ok := args["_docker_argv"]
+	if !ok {
+		return nil, false
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v, true
+	case []interface{}:
+		argv := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				argv = append(argv, s)
+			}
+		}
+		if len(argv) > 0 {
+			return argv, true
+		}
+	}
+	return nil, false
+}
+
+func (r *Runner) runDockerArgv(ctx context.Context, argv []string) (*tools.ToolResult, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("empty docker argv")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	output, err := cmd.CombinedOutput()
+
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return &tools.ToolResult{
+				Success: false,
+				Error:   err.Error(),
+			}, nil
+		}
+	}
+
+	return &tools.ToolResult{
+		Success: exitCode == 0,
+		Output:  string(output),
+		Data: map[string]interface{}{
+			"exit_code": exitCode,
+			"isolated":  true,
+		},
+	}, nil
 }
 
 // RunParallel executes multiple tool calls concurrently with a limit.
