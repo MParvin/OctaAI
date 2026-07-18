@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mparvin/octaai/pkg/config"
+	"github.com/mparvin/octaai/pkg/permission"
 )
 
 // FilesystemTool provides file and directory operations
@@ -63,11 +64,14 @@ func (t *FilesystemTool) Execute(ctx context.Context, args map[string]interface{
 		return nil, fmt.Errorf("path is required")
 	}
 
-	// Resolve path
-	fullPath := config.ResolveProjectPath(t.cfg, pathStr)
-
-	// Check if path is allowed
-	if !t.isPathAllowed(fullPath) {
+	fullPath, err := permission.ResolveSafePath(t.cfg, pathStr)
+	if err != nil {
+		return &ToolResult{
+			Success: false,
+			Error:   fmt.Sprintf("invalid path: %v", err),
+		}, nil
+	}
+	if !permission.PathAllowed(t.cfg, fullPath) {
 		return &ToolResult{
 			Success: false,
 			Error:   fmt.Sprintf("path not allowed: %s", fullPath),
@@ -90,24 +94,6 @@ func (t *FilesystemTool) Execute(ctx context.Context, args map[string]interface{
 	default:
 		return nil, fmt.Errorf("unknown action: %s", action)
 	}
-}
-
-func (t *FilesystemTool) isPathAllowed(path string) bool {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-
-	for _, allowedPath := range t.cfg.Safety.AllowPaths {
-		allowedAbs, err := filepath.Abs(allowedPath)
-		if err != nil {
-			continue
-		}
-		if strings.HasPrefix(absPath, allowedAbs) {
-			return true
-		}
-	}
-	return false
 }
 
 func (t *FilesystemTool) createDirectory(path string) (*ToolResult, error) {

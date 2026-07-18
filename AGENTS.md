@@ -74,14 +74,18 @@ Configured via `llm.provider` in config. Supported values: `ollama` (default, no
 
 ### Memory
 - `pkg/memory/manager.go`: appends facts learned during execution to a per-goal store.
-- `pkg/memory/semantic.go`: vector-based retrieval providing relevant past facts to the planner as context, improving replanning quality.
+- `pkg/memory/semantic.go`: TF-IDF semantic retrieval of past facts for planner context (not a vector DB).
 
 ### Configuration that affects behavior
 - Primary config: `~/.config/octaai/config.yaml` (created by `octa-agent init`).
 - Key sections in `pkg/config/config.go`:
-  - `llm`: provider / model / base_url / api_key / temperature / max_tokens
-  - `safety`: allow_paths, allow_http_hosts, deny_commands, require_confirmation_for
-  - `engine`: max_loops, max_retries, enable_replan, enable_parallel
-  - `isolation`: enabled, docker (image/network/memory/cpu limits), require_docker_for
-  - `browser`: enabled, port, token, browser_domains
-  - `storage`: type, path (defaults to `~/.config/octaai/state.db`)
+ - `llm`: provider / model / base_url / api_key / temperature / max_tokens
+ - `safety`: allow_paths, allow_http_hosts, deny_commands, require_confirmation_for
+ - `engine`: max_loops, max_retries, enable_replan, enable_parallel
+ - `isolation`: enabled, docker (image/network/memory/cpu limits), require_docker_for
+ - `browser`: enabled, port, token, browser_domains
+ - `storage`: type, path (defaults to `~/.config/octaai/state.db`)
+ - `features`: experimental v2 toggles (`use_htn_planner`, `use_dag_executor`, etc.) — **parsed but not wired** into the production engine; leave false (see `IMPLEMENTATION_PLAN.md` Phase 3/7).
+
+### Memory note
+- `pkg/memory/semantic.go` is TF-IDF keyword retrieval, not a vector database. `features.use_vector_memory` is unimplemented.

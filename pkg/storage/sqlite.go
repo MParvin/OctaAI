@@ -24,9 +24,23 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 		return nil, fmt.Errorf("failed to create db directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath)
+	// Enable WAL + busy timeout for concurrent daemon goal workers.
+	dsn := dbPath
+	if !strings.Contains(dbPath, "?") {
+		dsn = dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on"
+	}
+
+	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	db.SetMaxOpenConns(1) // SQLite writer serialization; readers share the connection
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to configure sqlite pragmas: %w", err)
 	}
 
 	storage := &SQLiteStorage{db: db}

@@ -37,12 +37,12 @@ OctaAI can control a live Firefox browser through a companion extension, enablin
    ```bash
    ./bin/octa-agentd --browser-port 8765
    ```
-2. Build and load the Firefox extension:
+2. Load the Firefox extension from this repo:
    ```bash
-   cd ../octaai-firefox-addon && npm install && npm run build
-   # Then in Firefox: about:debugging → Load Temporary Add-on → dist/manifest.json
+   # In Firefox: about:debugging → Load Temporary Add-on
+   # → plugins/firefox-addon/src/manifest.json
    ```
-3. Set a shared token in `config.yaml` and in the extension's Settings page.
+3. Set a shared token in `config.yaml` and in the extension Settings (`Server URL`: `ws://localhost:8765/ws`).
 
 See [docs/BROWSER_AUTOMATION.md](docs/BROWSER_AUTOMATION.md) for the full setup guide and [examples/browser/](examples/browser/) for usage examples.
 
@@ -130,17 +130,13 @@ octaai/
 └── docs/                 # Documentation
 ```
 
-## Development Phases
+## Development status
 
-- [x] Phase 1: Skeleton & LLM Provider
-- [x] Phase 2: Filesystem & Code Runner Tools
-- [x] Phase 3: Browser Automation (Firefox addon)
-- [x] Phase 4: Execution Engine Refactor (state machine, steps, evaluator)
-- [x] Phase 5: Plugins, Checkpoints, Workflow Validation, Observability
-- [x] Phase 6: Docker Isolation, Human Approval CLI, Semantic Memory
-- [x] Phase 7: Parallel Execution Graph, Dynamic Replanning
+Core daemon + CLI, tools, permissions, Docker isolation, browser automation, and TF-IDF memory are production-usable.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [prompt.md](prompt.md) for the engineering roadmap.
+Experimental v2 packages (HTN planner, capability registry, workflow DAG helpers) exist but are **not** wired into the engine until Phase 7 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Do not enable `features.*` expecting behavior changes.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md).
 
 ## License
 

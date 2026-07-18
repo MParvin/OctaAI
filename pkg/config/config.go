@@ -19,6 +19,37 @@ type Config struct {
 	Browser      BrowserConfig       `yaml:"browser"`
 	Isolation    IsolationConfig     `yaml:"isolation"`
 	Engine       EngineRuntimeConfig `yaml:"engine"`
+	Features     FeatureFlags        `yaml:"features"`
+}
+
+// FeatureFlags holds experimental v2 toggles.
+// Most flags are parsed for forward compatibility but are not yet wired into
+// the production engine (pkg/engine). Leaving them true has no runtime effect
+// until the corresponding Phase 7 integration lands. See IMPLEMENTATION_PLAN.md.
+type FeatureFlags struct {
+	// UseHTNPlanner — UNIMPLEMENTED in engine (packages exist under pkg/planner).
+	UseHTNPlanner bool `yaml:"use_htn_planner"`
+
+	// UseDAGExecutor — UNIMPLEMENTED (pkg/workflow helpers are test-only today).
+	UseDAGExecutor bool `yaml:"use_dag_executor"`
+
+	// EnableAG2 — UNIMPLEMENTED (no AutoGen integration).
+	EnableAG2 bool `yaml:"enable_ag2"`
+
+	// UseVectorMemory — UNIMPLEMENTED (memory uses TF-IDF in pkg/memory/semantic.go).
+	UseVectorMemory bool `yaml:"use_vector_memory"`
+
+	// UseCapabilities — registry code exists (pkg/capability) but engine ignores this flag.
+	UseCapabilities bool `yaml:"use_capabilities"`
+
+	// EnableMCP — UNIMPLEMENTED.
+	EnableMCP bool `yaml:"enable_mcp"`
+
+	// EnableAdaptiveReplan — UNIMPLEMENTED (v1 replan uses engine.enable_replan).
+	EnableAdaptiveReplan bool `yaml:"enable_adaptive_replan"`
+
+	// EnableReflection — UNIMPLEMENTED.
+	EnableReflection bool `yaml:"enable_reflection"`
 }
 
 // LLMConfig holds LLM provider configuration
@@ -154,6 +185,17 @@ func DefaultConfig() *Config {
 			EnableReplan:   true,
 			EnableParallel: true,
 		},
+		Features: FeatureFlags{
+			// All experimental; defaults off until engine wiring exists.
+			UseHTNPlanner:        false,
+			UseDAGExecutor:       false,
+			EnableAG2:            false,
+			UseVectorMemory:      false,
+			UseCapabilities:      false,
+			EnableMCP:            false,
+			EnableAdaptiveReplan: false,
+			EnableReflection:     false,
+		},
 	}
 }
 
@@ -213,7 +255,7 @@ func SaveConfig(cfg *Config, path string) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 

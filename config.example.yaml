@@ -56,6 +56,33 @@ engine:
   max_retries: 3
   enable_replan: true
   enable_parallel: true
+# Experimental v2 flags (parsed only — NOT wired into the production engine yet).
+# Keep these false/default unless you are developing Phase 7 integrations.
+# See IMPLEMENTATION_PLAN.md Phase 3/7 and IMPLEMENTATION_LOG.md.
+features:
+  # UNIMPLEMENTED: HTN planner packages exist; engine still uses template planner
+  use_htn_planner: false
+
+  # UNIMPLEMENTED: DAG executor not used by engine loop
+  use_dag_executor: false
+
+  # UNIMPLEMENTED: no AG2 / AutoGen integration
+  enable_ag2: false
+
+  # UNIMPLEMENTED: memory is TF-IDF today (pkg/memory/semantic.go), not a vector DB
+  use_vector_memory: false
+
+  # PARTIAL: capability registry exists; engine does not read this flag
+  use_capabilities: false
+
+  # UNIMPLEMENTED: no MCP client/server
+  enable_mcp: false
+
+  # UNIMPLEMENTED: use engine.enable_replan for v1 replanning
+  enable_adaptive_replan: false
+
+  # UNIMPLEMENTED: no reflection loop
+  enable_reflection: false
 
 browser:
   enabled: false

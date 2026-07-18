@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/mparvin/octaai/pkg/config"
+	"github.com/mparvin/octaai/pkg/permission"
 )
 
 // GitTool provides git operations
@@ -102,12 +103,26 @@ func (t *GitTool) Execute(ctx context.Context, args map[string]interface{}) (*To
 	}
 }
 
+func (t *GitTool) resolveAllowedPath(path string) (string, error) {
+	resolved, err := permission.ResolveSafePath(t.cfg, path)
+	if err != nil {
+		return "", err
+	}
+	if !permission.PathAllowed(t.cfg, resolved) {
+		return "", fmt.Errorf("path not allowed: %s", path)
+	}
+	return resolved, nil
+}
+
 func (t *GitTool) clone(ctx context.Context, url, destPath string) (*ToolResult, error) {
 	if url == "" {
 		return nil, fmt.Errorf("url is required for clone")
 	}
 
-	destPath = config.ResolveProjectPath(t.cfg, destPath)
+	destPath, err := t.resolveAllowedPath(destPath)
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 
 	// Ensure parent directory exists
 	parentDir := filepath.Dir(destPath)
@@ -135,7 +150,10 @@ func (t *GitTool) clone(ctx context.Context, url, destPath string) (*ToolResult,
 }
 
 func (t *GitTool) init(ctx context.Context, path string) (*ToolResult, error) {
-	path = config.ResolveProjectPath(t.cfg, path)
+	path, err := t.resolveAllowedPath(path)
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return &ToolResult{
 			Success: false,
@@ -161,7 +179,10 @@ func (t *GitTool) init(ctx context.Context, path string) (*ToolResult, error) {
 }
 
 func (t *GitTool) commitAll(ctx context.Context, path, message string) (*ToolResult, error) {
-	path = config.ResolveProjectPath(t.cfg, path)
+	path, err := t.resolveAllowedPath(path)
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 	if message == "" {
 		message = "Automated commit by OctaAI"
 	}
@@ -195,7 +216,10 @@ func (t *GitTool) commitAll(ctx context.Context, path, message string) (*ToolRes
 }
 
 func (t *GitTool) push(ctx context.Context, path, remote, branch string) (*ToolResult, error) {
-	path = config.ResolveProjectPath(t.cfg, path)
+	path, err := t.resolveAllowedPath(path)
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 	cmd := exec.CommandContext(ctx, "git", "push", remote, branch)
 	cmd.Dir = path
 	output, err := cmd.CombinedOutput()

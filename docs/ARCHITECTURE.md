@@ -1,6 +1,6 @@
 # OctaAI Architecture
 
-Production-oriented autonomous execution engine. This document describes the refactored architecture introduced per the engineering roadmap in `prompt.md`.
+Production-oriented autonomous execution engine. For the live delivery roadmap (security first, then v2 wiring), see `IMPLEMENTATION_PLAN.md` and `IMPLEMENTATION_LOG.md`.
 
 ## Component Overview
 
@@ -103,13 +103,7 @@ Default evaluators run in sequence:
 
 ## Workflow Validation
 
-LLM-generated workflow JSON is validated before execution:
-
-- Required node IDs and descriptions
-- Valid dependency references
-- No dependency cycles
-
-See `pkg/workflow/workflow.go`.
+`pkg/workflow` provides DAG validation helpers used in tests. The production engine loop does **not** currently execute LLM-generated workflow JSON through this package (see `features.use_dag_executor` — unimplemented).
 
 ## Directory Layout
 
@@ -133,15 +127,16 @@ pkg/
 └── browser/        # Firefox WebSocket server
 ```
 
-## Roadmap (from prompt.md)
+## Roadmap status (honest)
 
-| Phase | Status | Scope |
-|-------|--------|-------|
-| A | Done | State machine, execution steps, engine refactor |
-| B | Done | Planner, evaluator, permission, observability |
-| C | Done | Checkpoints, memory, workflow validation, plugins |
-| D | Done | Docker isolation, approval CLI, semantic memory |
-| E | Done | Parallel execution graph, dynamic replanning |
+| Area | Status | Notes |
+|------|--------|-------|
+| State machine, execution steps, engine | Done | Production path in `pkg/engine` |
+| Template planner, evaluators, permissions | Done | |
+| Checkpoints, TF-IDF memory, plugins | Done | Memory is TF-IDF, not a vector DB |
+| Docker isolation, approval CLI | Done | Argv-safe Docker wrap |
+| Browser WebSocket + Firefox addon | Done | `plugins/firefox-addon`, path `/ws` |
+| HTN planner / DAG executor / AG2 / MCP | Packages only | Feature flags parsed but not wired (Phase 7) |
 
 ## Failure Protection
 

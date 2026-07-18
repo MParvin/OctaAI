@@ -2,7 +2,6 @@ package permission
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/mparvin/octaai/pkg/approval"
@@ -44,11 +43,13 @@ func NewManager(cfg *config.Config, store storage.Storage) *Manager {
 // CheckPath verifies a filesystem path is within allowed roots.
 func (m *Manager) CheckPath(path string) CheckResult {
 	if len(m.cfg.Safety.AllowPaths) == 0 {
-		return CheckResult{Decision: DecisionAllow}
+		return CheckResult{
+			Decision: DecisionDeny,
+			Reason:   "no allow_paths configured; refusing filesystem access",
+		}
 	}
 
-	fullPath := config.ResolveProjectPath(m.cfg, path)
-	absPath, err := filepath.Abs(fullPath)
+	absPath, err := ResolveSafePath(m.cfg, path)
 	if err != nil {
 		return CheckResult{
 			Decision: DecisionDeny,
@@ -56,14 +57,8 @@ func (m *Manager) CheckPath(path string) CheckResult {
 		}
 	}
 
-	for _, allowed := range m.cfg.Safety.AllowPaths {
-		allowedAbs, err := filepath.Abs(allowed)
-		if err != nil {
-			continue
-		}
-		if absPath == allowedAbs || strings.HasPrefix(absPath, allowedAbs+string(filepath.Separator)) {
-			return CheckResult{Decision: DecisionAllow}
-		}
+	if PathAllowed(m.cfg, absPath) {
+		return CheckResult{Decision: DecisionAllow}
 	}
 	return CheckResult{
 		Decision: DecisionDeny,
