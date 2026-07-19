@@ -1,4 +1,4 @@
-.PHONY: build install clean test lint run-daemon run-cli test-coverage coverage-gate
+.PHONY: build install clean test lint run-daemon run-cli test-coverage coverage-gate live-test
 
 # Build variables
 BINARY_DAEMON=octa-agentd
@@ -69,6 +69,11 @@ run-cli: build-cli
 	@echo "Running octa-agent..."
 	$(BUILD_DIR)/$(BINARY_CLI)
 
+# End-to-end smoke against a live Ollama instance (not for CI by default).
+live-test: build
+	@echo "Running live end-to-end smoke test..."
+	@./scripts/live-test.sh
+
 deps:
 	@echo "Downloading dependencies..."
 	go mod download
@@ -95,6 +100,7 @@ help:
 	@echo "  lint           - Run linter (golangci-lint or vet/gofmt)"
 	@echo "  run-daemon     - Build and run daemon"
 	@echo "  run-cli        - Build and run CLI"
+	@echo "  live-test      - E2E smoke (daemon+CLI+Ollama; requires ollama/sqlite3)"
 	@echo "  deps           - Download dependencies"
 	@echo "  fmt            - Format code"
 	@echo "  vet            - Vet code"

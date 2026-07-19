@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OctaAI Settings</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+      padding: 40px;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      color: #999;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+
+    .form-group {
+      margin-bottom: 24px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #333;
+      font-size: 14px;
+    }
+
+    .label-description {
+      display: block;
+      font-weight: normal;
+      color: #999;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    input[type="number"]:focus,
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    input[type="checkbox"] {
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+    }
+
+    .checkbox-label {
+      margin: 0;
+      display: inline;
+      cursor: pointer;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 30px;
+    }
+
+    button {
+      flex: 1;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #667eea;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #5568d3;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-secondary {
+      background: #e0e0e0;
+      color: #333;
+    }
+
+    .btn-secondary:hover {
+      background: #d0d0d0;
+    }
+
+    .status-message {
+      padding: 12px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      font-size: 13px;
+      display: none;
+    }
+
+    .status-message.show {
+      display: block;
+    }
+
+    .status-message.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+      border: 1px solid #c8e6c9;
+    }
+
+    .status-message.error {
+      background: #ffebee;
+      color: #c62828;
+      border: 1px solid #ffcdd2;
+    }
+
+    .divider {
+      height: 1px;
+      background: #eee;
+      margin: 30px 0;
+    }
+
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 16px;
+      margin-top: 20px;
+    }
+
+    .help-text {
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #666;
+      margin-top: 8px;
+      border-left: 3px solid #667eea;
+    }
+
+    .test-button {
+      padding: 8px 12px;
+      margin-top: 8px;
+      font-size: 13px;
+    }
+
+    .input-group {
+      position: relative;
+    }
+
+    .input-suffix {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #999;
+      font-size: 12px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>OctaAI Settings</h1>
+    <p class="subtitle">Configure your connection to the OctaAI daemon</p>
+
+    <div class="status-message" id="statusMessage"></div>
+
+    <form id="settingsForm">
+      <div class="section-title">Server Configuration</div>
+
+      <div class="form-group">
+        <label for="serverUrl">Server URL</label>
+        <input
+          type="text"
+          id="serverUrl"
+          name="serverUrl"
+          placeholder="ws://localhost:8765/ws"
+          required
+        >
+        <span class="label-description">WebSocket URL of the OctaAI daemon</span>
+      </div>
+
+      <div class="form-group">
+        <label for="token">Authentication Token</label>
+        <input
+          type="password"
+          id="token"
+          name="token"
+          placeholder="Enter your authentication token (optional)"
+        >
+        <span class="label-description">Token required by the daemon (if enabled)</span>
+      </div>
+
+      <div class="form-group">
+        <div class="checkbox-group">
+          <input type="checkbox" id="autoConnect" name="autoConnect">
+          <label class="checkbox-label" for="autoConnect">Auto-connect on startup</label>
+        </div>
+        <span class="label-description" style="display: block; margin-top: 8px;">Automatically connect to the daemon when Firefox starts</span>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section-title">Timeouts & Performance</div>
+
+      <div class="form-group">
+        <label for="commandTimeout">Command Timeout (ms)</label>
+        <input
+          type="number"
+          id="commandTimeout"
+          name="commandTimeout"
+          min="1000"
+          max="120000"
+          step="1000"
+          placeholder="30000"
+        >
+        <span class="label-description">How long to wait for a command to complete</span>
+      </div>
+
+      <div class="form-group">
+        <label for="typeDelay">Typing Delay (ms)</label>
+        <input
+          type="number"
+          id="typeDelay"
+          name="typeDelay"
+          min="10"
+          max="1000"
+          step="10"
+          placeholder="50"
+        >
+        <span class="label-description">Delay between characters when simulating typing</span>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="section-title">Testing</div>
+
+      <button type="button" class="btn-secondary test-button" id="testConnection">
+        Test Connection
+      </button>
+      <div id="testResult" style="margin-top: 12px; font-size: 13px; display: none;"></div>
+
+      <div class="button-group">
+        <button type="submit" class="btn-primary">Save Settings</button>
+        <button type="button" class="btn-secondary" id="resetBtn">Reset to Defaults</button>
+      </div>
+    </form>
+
+    <div class="help-text">
+      <strong>Need help?</strong><br>
+      Visit the <a href="https://github.com/yourusername/octaai-firefox-addon" style="color: #667eea;">extension documentation</a>
+      for setup instructions and troubleshooting.
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

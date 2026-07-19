@@ -216,6 +216,24 @@ ollama serve
 - Check internet connection
 - Check API quota/billing
 
+## Live end-to-end smoke test
+
+`make live-test` builds the binaries, starts an isolated daemon (temp `HOME`), submits a simple filesystem goal via the CLI, polls `status`/`logs` until completion, and asserts that `LIVE_OK.txt` was written with the expected content.
+
+Prerequisites:
+- Ollama running and reachable (`ollama serve`; default `http://127.0.0.1:11434`)
+- At least one local chat model in Ollama (auto-picks `qwen2.5:32b`, `qwen3:8b`, … or set `LIVE_TEST_MODEL`)
+- `sqlite3` and `curl` on `PATH`
+
+```bash
+make live-test
+
+# Optional overrides
+LIVE_TEST_MODEL=qwen3:8b LIVE_TEST_TIMEOUT_SEC=900 LIVE_TEST_KEEP=1 make live-test
+```
+
+This is a local smoke test (LLM-dependent); it is not part of the default CI suite.
+
 ## Daemon health
 
 By default the daemon listens on `127.0.0.1:8766`:
