@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/mparvin/octaai/pkg/config"
 )
@@ -40,10 +41,21 @@ func (d *Docker) ShouldIsolate(toolName string) bool {
 	return false
 }
 
-// WrapCommand builds a docker run invocation argv for a shell command.
-func (d *Docker) WrapCommand(cwd, command string) ([]string, error) {
-	if command == "" {
+// SplitCommand splits a command string into argv without invoking a shell.
+func SplitCommand(command string) ([]string, error) {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty command")
+	}
+	return parts, nil
+}
+
+// WrapCommand builds a docker run invocation argv for a command.
+// The command is executed as argv (image binary + args), never via `sh -c`.
+func (d *Docker) WrapCommand(cwd, command string) ([]string, error) {
+	cmdParts, err := SplitCommand(command)
+	if err != nil {
+		return nil, err
 	}
 
 	dc := d.cfg.Isolation.Docker
@@ -55,7 +67,7 @@ func (d *Docker) WrapCommand(cwd, command string) ([]string, error) {
 	containerWorkdir := "/workspace"
 	if cwd != "" {
 		resolved := config.ResolveProjectPath(d.cfg, cwd)
-		if rel, err := filepath.Rel(mount, resolved); err == nil && rel != "." {
+		if rel, err := filepath.Rel(mount, resolved); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
 			containerWorkdir = "/workspace/" + filepath.ToSlash(rel)
 		}
 	}
@@ -76,7 +88,9 @@ func (d *Docker) WrapCommand(cwd, command string) ([]string, error) {
 	args = append(args, "-v", fmt.Sprintf("%s:/workspace:rw", mount))
 	args = append(args, "-w", containerWorkdir)
 	args = append(args, dc.ExtraArgs...)
-	args = append(args, dc.Image, "sh", "-c", command)
+	// Entrypoint is the binary; remaining tokens are args — no shell.
+	args = append(args, dc.Image)
+	args = append(args, cmdParts...)
 
 	return append([]string{"docker"}, args...), nil
 }

@@ -56,6 +56,33 @@ engine:
   max_retries: 3
   enable_replan: true
   enable_parallel: true
+# Feature flags — gradual v2 migration. Defaults are off (safe).
+# Wired: use_htn_planner, use_dag_executor, use_capabilities.
+# Not wired: enable_ag2, use_vector_memory, enable_mcp, enable_adaptive_replan, enable_reflection.
+features:
+  # HTN planner with fallback to template planner on failure
+  use_htn_planner: false
+
+  # DAG scheduler for ready-task batches (pkg/executor)
+  use_dag_executor: false
+
+  # UNIMPLEMENTED: no AG2 / AutoGen integration
+  enable_ag2: false
+
+  # UNIMPLEMENTED: memory is TF-IDF today (pkg/memory/semantic.go), not a vector DB
+  use_vector_memory: false
+
+  # Registers builtin capability registry (also enabled when use_htn_planner is true)
+  use_capabilities: false
+
+  # UNIMPLEMENTED: no MCP client/server
+  enable_mcp: false
+
+  # UNIMPLEMENTED: use engine.enable_replan for v1 replanning
+  enable_adaptive_replan: false
+
+  # UNIMPLEMENTED: no reflection loop
+  enable_reflection: false
 
 browser:
   enabled: false

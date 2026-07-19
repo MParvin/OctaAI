@@ -4,10 +4,10 @@ import "testing"
 
 func TestSanitizeProjectName(t *testing.T) {
 	tests := map[string]string{
-		"github-list":  "github-list",
-		"GitHub List":  "github-list",
-		"  my_app  ":   "my_app",
-		"foo@bar!":     "foobar",
+		"github-list": "github-list",
+		"GitHub List": "github-list",
+		"  my_app  ":  "my_app",
+		"foo@bar!":    "foobar",
 	}
 	for input, want := range tests {
 		if got := SanitizeProjectName(input); got != want {

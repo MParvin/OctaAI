@@ -9,7 +9,7 @@ octa-agentd  ──WebSocket──►  Firefox Extension  ──DOM API──►
      │                         background.js        content.js
      │
      └── pkg/tools/browser.go   (browser tool — calls SendCommandToAny)
-     └── pkg/browser/server.go  (WebSocket server on ws://localhost:8765)
+     └── pkg/browser/server.go  (WebSocket server on ws://localhost:8765/ws)
 ```
 
 The daemon exposes a WebSocket server. The Firefox extension connects to it on startup, authenticates with a shared token, and relays commands from the agent to the active browser tab.
@@ -29,15 +29,9 @@ make build
 
 1. Open Firefox and navigate to `about:debugging`.
 2. Click **This Firefox** → **Load Temporary Add-on**.
-3. Select `octaai-firefox-addon/dist/manifest.json`.
+3. Select `plugins/firefox-addon/src/manifest.json` (temporary load from source), or a built `dist/manifest.json` if you use the addon build scripts.
 
-To build the extension first:
-
-```bash
-cd ../octaai-firefox-addon
-npm install
-npm run build        # production build → dist/
-```
+The companion extension lives in this repository at `plugins/firefox-addon/`.
 
 ### 3. Configure a shared token
 
@@ -58,7 +52,7 @@ browser:
   auto_screenshot: true
 ```
 
-Open the extension settings in Firefox (**⚙ Settings** in the popup) and paste the same token.
+Open the extension settings in Firefox (**⚙ Settings** in the popup), set **Server URL** to `ws://localhost:8765/ws`, and paste the same token.
 
 ### 4. Verify the connection
 
@@ -132,37 +126,42 @@ Every action that targets a DOM element accepts one of three locator strategies 
 
 ### Authentication
 
-The extension sends its token as a query-parameter when connecting:
+The extension authenticates with `Sec-WebSocket-Protocol: octaai.<token>` (preferred). The daemon still accepts a legacy `?token=` query parameter for compatibility, but that form can leak into logs/proxies and should be avoided.
+
+Default endpoint:
 ```
-ws://localhost:8765?token=<token>
+ws://localhost:8765/ws
 ```
-The daemon rejects connections with a missing or incorrect token immediately.
+
+Connections with a missing or incorrect token are rejected immediately. Empty `Origin` headers are rejected; allowed origins are extension pages and localhost.
 
 ### Token storage
 
-- **Daemon side**: stored in `config.yaml` (should be `chmod 600`).
+- **Daemon side**: written via `SaveConfig` with mode `0600`. Prefer generating/setting `browser.token` in config (value is not logged in full).
 - **Extension side**: stored in Firefox's `storage.sync` (encrypted by the browser profile).
 
 Never commit `config.yaml` to source control. The repository's `.gitignore` already excludes it.
 
 ### Domain whitelist
 
-Set `browser_domains` in `config.yaml` to restrict which sites the agent is permitted to interact with:
+Set `browser_domains` in `config.yaml` to restrict which sites the agent may navigate to. Matching is exact host or subdomain suffix (e.g. `example.com` allows `www.example.com`). Wildcard patterns such as `*.google.com` are **not** supported today — list the registrable domain instead:
 
 ```yaml
 browser:
   browser_domains:
     - "github.com"
-    - "*.google.com"
+    - "google.com"
 ```
+
+An empty list means all domains are allowed (permission layer only; still keep the daemon on localhost).
 
 ### Command injection
 
-The `execute` action runs arbitrary JavaScript inside the active tab. Restrict access to the daemon socket to trusted local processes only. Do not expose port 8765 on a network interface.
+The `execute` action runs arbitrary JavaScript inside the active tab and always requires human approval. Restrict access to the daemon socket to trusted local processes only. Do not expose port 8765 on a network interface.
 
-### Content Security Policy
+### Content scripts
 
-The extension injects `content.js` only on explicit request from the background script (`scripting.executeScript`), not automatically on every page load, minimising the attack surface.
+The Firefox `manifest.json` registers `content_scripts` for `<all_urls>`, so `content.js` is injected on matching pages at `document_start`. Prefer a tight `browser_domains` allowlist and do not load the temporary add-on in profiles used for sensitive browsing.
 
 ---
 
@@ -183,10 +182,6 @@ The extension injects `content.js` only on explicit request from the background 
 To rebuild the extension after making changes to addon source:
 
 ```bash
-cd ../octaai-firefox-addon
-npm run build:dev      # development build with source maps
-npm run watch          # incremental rebuild on save
-npm test               # run Jest unit tests
+cd plugins/firefox-addon
+# Edit sources under src/, then reload in Firefox: about:debugging → Reload
 ```
-
-Reload the extension in Firefox after each build: `about:debugging` → **Reload**.

@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
+
+const authProtocolPrefix = "octaai."
 
 // Server manages WebSocket connections from browser addons
 type Server struct {
@@ -26,9 +29,10 @@ type Server struct {
 }
 
 // allowedOrigin reports whether a WebSocket Origin header is permitted.
+// Empty Origin is rejected to reduce CSRF-style WS abuse from web pages.
 func allowedOrigin(origin string) bool {
 	if origin == "" {
-		return true
+		return false
 	}
 	allowedPrefixes := []string{
 		"moz-extension://",
@@ -44,6 +48,25 @@ func allowedOrigin(origin string) bool {
 		}
 	}
 	return false
+}
+
+func tokenFromRequest(r *http.Request, expected string) (string, bool) {
+	// Prefer Sec-WebSocket-Protocol: octaai.<token>
+	for _, proto := range websocket.Subprotocols(r) {
+		if strings.HasPrefix(proto, authProtocolPrefix) {
+			tok := strings.TrimPrefix(proto, authProtocolPrefix)
+			if subtle.ConstantTimeCompare([]byte(tok), []byte(expected)) == 1 {
+				return proto, true
+			}
+			return "", false
+		}
+	}
+	// Legacy query parameter (discouraged; still accepted for compatibility)
+	authToken := r.URL.Query().Get("token")
+	if authToken != "" && subtle.ConstantTimeCompare([]byte(authToken), []byte(expected)) == 1 {
+		return "", true
+	}
+	return "", false
 }
 
 // NewServer creates a new WebSocket server for browser connections.
@@ -65,8 +88,9 @@ func NewServer(addr string, token string) *Server {
 	s.mux.HandleFunc("/health", s.handleHealth)
 
 	s.server = &http.Server{
-		Addr:    addr,
-		Handler: s.mux,
+		Addr:              addr,
+		Handler:           s.mux,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	return s
@@ -77,7 +101,7 @@ func (s *Server) Start() error {
 	if s.token == "" {
 		return fmt.Errorf("browser WebSocket token is required")
 	}
-	log.Printf("Starting browser WebSocket server on %s", s.addr)
+	log.Printf("Starting browser WebSocket server on %s (path /ws)", s.addr)
 	return s.server.ListenAndServe()
 }
 
@@ -96,14 +120,19 @@ func (s *Server) Stop(ctx context.Context) error {
 
 // handleWebSocket handles WebSocket connection requests
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	authToken := r.URL.Query().Get("token")
-	if authToken != s.token {
+	selectedProto, ok := tokenFromRequest(r, s.token)
+	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		log.Printf("Rejected connection: invalid or missing token")
 		return
 	}
 
-	conn, err := s.upgrader.Upgrade(w, r, nil)
+	upgrader := s.upgrader
+	if selectedProto != "" {
+		upgrader.Subprotocols = []string{selectedProto}
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v", err)
 		return
@@ -114,9 +143,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	s.clientsMu.Lock()
 	s.clients[clientID] = client
+	total := len(s.clients)
 	s.clientsMu.Unlock()
 
-	log.Printf("Browser connected: %s (total: %d)", clientID, len(s.clients))
+	log.Printf("Browser connected: %s (total: %d)", clientID, total)
 
 	go s.handleClient(client)
 }
@@ -127,8 +157,9 @@ func (s *Server) handleClient(client *Client) {
 		client.Close()
 		s.clientsMu.Lock()
 		delete(s.clients, client.ID)
+		remaining := len(s.clients)
 		s.clientsMu.Unlock()
-		log.Printf("Browser disconnected: %s (remaining: %d)", client.ID, len(s.clients))
+		log.Printf("Browser disconnected: %s (remaining: %d)", client.ID, remaining)
 	}()
 
 	go client.pingRoutine()

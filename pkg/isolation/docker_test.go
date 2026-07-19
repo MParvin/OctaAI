@@ -1,6 +1,7 @@
 package isolation
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mparvin/octaai/pkg/config"
@@ -27,8 +28,43 @@ func TestWrapCommand(t *testing.T) {
 	if joined[:6] != "docker" {
 		t.Fatalf("expected docker command, got %q", joined)
 	}
-	if !contains(joined, "go test ./...") {
-		t.Fatalf("expected wrapped command in docker args, got %q", joined)
+	if contains(joined, "sh -c") {
+		t.Fatalf("docker wrap must not use shell: %q", joined)
+	}
+	if !contains(joined, " go ") && !contains(joined, " go") {
+		// argv form: ... image go test ./...
+		foundGo := false
+		for _, p := range parts {
+			if p == "go" {
+				foundGo = true
+				break
+			}
+		}
+		if !foundGo {
+			t.Fatalf("expected argv-safe go binary in docker args, got %q", joined)
+		}
+	}
+}
+
+func TestWrapCommandRejectsShellInjectionShape(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Isolation.Enabled = true
+	cfg.Isolation.Docker.Enabled = true
+	d := NewDocker(cfg)
+
+	parts, err := d.WrapCommand("myapp", "echo hi; rm -rf /")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range parts {
+		if p == "sh" || p == "-c" {
+			t.Fatalf("shell invocation must not appear in docker argv: %v", parts)
+		}
+	}
+	// Entire string is one argv token after Fields split — no shell metacharacter execution.
+	joined := strings.Join(parts, " ")
+	if strings.Contains(joined, "sh -c") {
+		t.Fatalf("unexpected sh -c: %s", joined)
 	}
 }
 

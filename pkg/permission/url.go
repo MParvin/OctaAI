@@ -7,7 +7,11 @@ import (
 	"strings"
 )
 
-func isBlockedIP(ip net.IP) bool {
+// IsBlockedIP reports whether an IP is loopback, private, link-local, or otherwise unsafe for outbound HTTP.
+func IsBlockedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
 	if ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
 		return true
 	}
@@ -44,7 +48,7 @@ func (m *Manager) CheckURL(rawURL string) CheckResult {
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
-		if isBlockedIP(ip) {
+		if IsBlockedIP(ip) {
 			return CheckResult{Decision: DecisionDeny, Reason: "private or link-local URLs are not allowed"}
 		}
 	} else {
@@ -53,7 +57,7 @@ func (m *Manager) CheckURL(rawURL string) CheckResult {
 			return CheckResult{Decision: DecisionDeny, Reason: fmt.Sprintf("failed to resolve host %q: %v", host, err)}
 		}
 		for _, resolved := range ips {
-			if isBlockedIP(resolved) {
+			if IsBlockedIP(resolved) {
 				return CheckResult{Decision: DecisionDeny, Reason: "private or link-local URLs are not allowed"}
 			}
 		}

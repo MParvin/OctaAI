@@ -37,12 +37,12 @@ OctaAI can control a live Firefox browser through a companion extension, enablin
    ```bash
    ./bin/octa-agentd --browser-port 8765
    ```
-2. Build and load the Firefox extension:
+2. Load the Firefox extension from this repo:
    ```bash
-   cd ../octaai-firefox-addon && npm install && npm run build
-   # Then in Firefox: about:debugging → Load Temporary Add-on → dist/manifest.json
+   # In Firefox: about:debugging → Load Temporary Add-on
+   # → plugins/firefox-addon/src/manifest.json
    ```
-3. Set a shared token in `config.yaml` and in the extension's Settings page.
+3. Set a shared token in `config.yaml` and in the extension Settings (`Server URL`: `ws://localhost:8765/ws`).
 
 See [docs/BROWSER_AUTOMATION.md](docs/BROWSER_AUTOMATION.md) for the full setup guide and [examples/browser/](examples/browser/) for usage examples.
 
@@ -130,17 +130,32 @@ octaai/
 └── docs/                 # Documentation
 ```
 
-## Development Phases
+## Development status
 
-- [x] Phase 1: Skeleton & LLM Provider
-- [x] Phase 2: Filesystem & Code Runner Tools
-- [x] Phase 3: Browser Automation (Firefox addon)
-- [x] Phase 4: Execution Engine Refactor (state machine, steps, evaluator)
-- [x] Phase 5: Plugins, Checkpoints, Workflow Validation, Observability
-- [x] Phase 6: Docker Isolation, Human Approval CLI, Semantic Memory
-- [x] Phase 7: Parallel Execution Graph, Dynamic Replanning
+Core daemon + CLI, tools, permissions, Docker isolation, browser automation, and TF-IDF memory are production-usable.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [prompt.md](prompt.md) for the engineering roadmap.
+Optional v2 flags (off by default):
+- `features.use_htn_planner` — HTN planning with v1 fallback
+- `features.use_dag_executor` — DAG scheduler for ready tasks
+- `features.use_capabilities` — builtin capability registry
+
+Still unimplemented: `enable_ag2`, `use_vector_memory`, `enable_mcp`, `enable_adaptive_replan`, `enable_reflection`.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md), and [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md).
+
+## Running in Docker (local-first)
+
+OctaAI is intentionally local-first — there is no Helm/Terraform/K8s chart. The multi-stage `Dockerfile` builds both binaries and runs as non-root user `octa`.
+
+```bash
+docker build -t octaai .
+docker run --rm -v "$HOME/.config/octaai:/home/octa/.config/octaai" \
+  -p 8766:8766 octaai --health-addr 0.0.0.0:8766
+```
+
+Health endpoints: `GET /healthz` (liveness), `GET /readyz` (readiness). Disable with `--health-addr=""`.
+
+For tool isolation inside goals, enable `isolation.enabled` / Docker sandbox in config (separate from running the daemon itself in a container).
 
 ## License
 

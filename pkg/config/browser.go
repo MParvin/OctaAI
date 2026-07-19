@@ -17,6 +17,6 @@ func EnsureBrowserToken(cfg *Config) (string, error) {
 		return "", fmt.Errorf("failed to generate browser token: %w", err)
 	}
 	cfg.Browser.Token = hex.EncodeToString(buf)
-	log.Printf("Generated browser WebSocket token; add to config: browser.token: %q", cfg.Browser.Token)
+	log.Printf("Generated browser WebSocket token (%d hex chars); set browser.token in config and the Firefox extension (value not logged)", len(cfg.Browser.Token))
 	return cfg.Browser.Token, nil
 }

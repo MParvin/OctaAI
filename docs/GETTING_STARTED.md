@@ -216,12 +216,64 @@ ollama serve
 - Check internet connection
 - Check API quota/billing
 
+## Live end-to-end smoke test
+
+`make live-test` builds the binaries, starts an isolated daemon (temp `HOME`), submits a simple filesystem goal via the CLI, polls `status`/`logs` until completion, and asserts that `LIVE_OK.txt` was written with the expected content.
+
+Prerequisites:
+- Ollama running and reachable (`ollama serve`; default `http://127.0.0.1:11434`)
+- At least one local chat model in Ollama (auto-picks `qwen2.5:32b`, `qwen3:8b`, … or set `LIVE_TEST_MODEL`)
+- `sqlite3` and `curl` on `PATH`
+
+```bash
+make live-test
+
+# Optional overrides
+LIVE_TEST_MODEL=qwen3:8b LIVE_TEST_TIMEOUT_SEC=900 LIVE_TEST_KEEP=1 make live-test
+```
+
+This is a local smoke test (LLM-dependent); it is not part of the default CI suite.
+
+## Daemon health
+
+By default the daemon listens on `127.0.0.1:8766`:
+
+```bash
+curl -s http://127.0.0.1:8766/healthz
+curl -s http://127.0.0.1:8766/readyz
+```
+
+Override with `--health-addr`, or disable with `--health-addr=""`.
+
+## Optional v2 feature flags
+
+In `~/.config/octaai/config.yaml`:
+
+```yaml
+features:
+  use_htn_planner: false   # HTN planner + v1 fallback
+  use_dag_executor: false  # DAG ready-task scheduler
+  use_capabilities: false  # capability registry
+```
+
+Leave unimplemented flags (`enable_ag2`, `use_vector_memory`, `enable_mcp`, …) false.
+
+## Docker (optional)
+
+```bash
+docker build -t octaai .
+docker run --rm -v "$HOME/.config/octaai:/home/octa/.config/octaai" \
+  -p 8766:8766 octaai --health-addr 0.0.0.0:8766
+```
+
+No Kubernetes/Helm/Terraform is provided; the project is local-first.
+
 ## Next Steps
 
-- Read the [Examples](examples/README.md) for more use cases
-- See [DESIGN.md](DESIGN.md) for architecture details
-- See [PROMPT.md](PROMPT.md) for the agent's system prompt
-- Check the [Makefile](Makefile) for development commands
+- Read the [Examples](../examples/README.md) for more use cases
+- See [ARCHITECTURE.md](ARCHITECTURE.md) for architecture details
+- See [IMPLEMENTATION_PLAN.md](../IMPLEMENTATION_PLAN.md) for the delivery roadmap
+- Check the [Makefile](../Makefile) for development commands
 
 ## Getting Help
 

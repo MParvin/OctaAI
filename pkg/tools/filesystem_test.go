@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mparvin/octaai/pkg/config"
+	"github.com/mparvin/octaai/pkg/permission"
 )
 
 func testFilesystemConfig(root string) *config.Config {
@@ -18,17 +19,26 @@ func testFilesystemConfig(root string) *config.Config {
 
 func TestFilesystemToolPathAllowance(t *testing.T) {
 	root := t.TempDir()
-	tool := NewFilesystemTool(testFilesystemConfig(root))
+	cfg := testFilesystemConfig(root)
 
 	allowed := filepath.Join(root, "app")
-	if !tool.isPathAllowed(allowed) {
+	if err := os.MkdirAll(allowed, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if !permission.PathAllowed(cfg, allowed) {
 		t.Fatal("expected path inside projects root to be allowed")
 	}
 
 	outside := filepath.Join(root, "..", "outside")
 	absOutside, _ := filepath.Abs(outside)
-	if tool.isPathAllowed(absOutside) {
+	if permission.PathAllowed(cfg, absOutside) {
 		t.Fatal("expected path outside projects root to be denied")
+	}
+
+	// Sibling prefix must not match (e.g. /tmp/proj vs /tmp/project)
+	sibling := root + "evil"
+	if permission.PathAllowed(cfg, sibling) {
+		t.Fatal("expected sibling-prefix path to be denied")
 	}
 }
 
