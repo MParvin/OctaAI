@@ -1,6 +1,8 @@
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
-RUN apt-get update && apt-get install -y gcc libc6-dev && rm -rf /var/lib/apt/lists/*
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+	&& rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -12,7 +14,9 @@ RUN make build
 
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y ca-certificates git openssh-client && rm -rf /var/lib/apt/lists/*
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
+	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/bin/octa-agentd /usr/local/bin/octa-agentd
 COPY --from=builder /src/bin/octa-agent /usr/local/bin/octa-agent
@@ -23,5 +27,8 @@ WORKDIR /home/octa
 
 ENV HOME=/home/octa
 VOLUME ["/home/octa/.config/octaai"]
+
+# Daemon health (optional): map host port to container 8766
+EXPOSE 8766
 
 ENTRYPOINT ["octa-agentd"]

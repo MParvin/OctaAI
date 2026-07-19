@@ -24,8 +24,11 @@ jobs:
       - name: Vet
         run: make vet
 
-      - name: Test
-        run: make test
+      - name: Lint
+        run: make lint
+
+      - name: Test + coverage gate
+        run: make coverage-gate COVERAGE_MIN=20
 
       - name: Build
         run: make build

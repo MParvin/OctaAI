@@ -7,9 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mparvin/octaai/pkg/capability"
 	"github.com/mparvin/octaai/pkg/config"
+	"github.com/mparvin/octaai/pkg/core"
 	"github.com/mparvin/octaai/pkg/evaluator"
 	"github.com/mparvin/octaai/pkg/execution"
+	"github.com/mparvin/octaai/pkg/executor"
 	"github.com/mparvin/octaai/pkg/llm"
 	"github.com/mparvin/octaai/pkg/memory"
 	"github.com/mparvin/octaai/pkg/observability"
@@ -56,6 +59,8 @@ type Engine struct {
 	memory     *memory.Manager
 	permission *permission.Manager
 	logger     *observability.Logger
+	caps       *core.CapabilityRegistry
+	useDAG     bool
 	goalID     string
 	loopCount  int
 }
@@ -70,7 +75,22 @@ func NewEngine(
 	mem := memory.NewManager(store)
 	logger := observability.NewLogger(store)
 	perm := permission.NewManager(cfg, store)
-	pl := planner.NewLLMPlanner(llmProvider, toolRegistry, mem, cfg.Engine.MaxRetries)
+	fallback := planner.NewLLMPlanner(llmProvider, toolRegistry, mem, cfg.Engine.MaxRetries)
+
+	var caps *core.CapabilityRegistry
+	if cfg.Features.UseCapabilities || cfg.Features.UseHTNPlanner {
+		caps = core.NewCapabilityRegistry()
+		if err := capability.RegisterBuiltinCapabilities(caps); err != nil {
+			logger.Warn("", fmt.Sprintf("capability registration failed: %v", err), nil)
+		}
+	}
+
+	var pl planner.Planner = fallback
+	if cfg.Features.UseHTNPlanner {
+		htn := planner.NewHTNPlanner(llmProvider, caps)
+		pl = planner.NewHTNBridge(htn, fallback, caps, cfg.Engine.MaxRetries)
+		logger.Info("", "HTN planner enabled (features.use_htn_planner)", nil)
+	}
 
 	ecfg := DefaultEngineConfig()
 	if cfg.Engine.MaxLoops > 0 {
@@ -97,7 +117,14 @@ func NewEngine(
 		memory:     mem,
 		permission: perm,
 		logger:     logger,
+		caps:       caps,
+		useDAG:     cfg.Features.UseDAGExecutor,
 	}
+}
+
+// Capabilities returns the capability registry when features.use_capabilities / HTN is on.
+func (e *Engine) Capabilities() *core.CapabilityRegistry {
+	return e.caps
 }
 
 // ProcessGoal runs a goal through the state machine until completion or failure.
@@ -323,6 +350,17 @@ func (e *Engine) executeReadyTasks(ctx context.Context, goal *storage.Goal) erro
 	tasks, err := e.store.GetTasksByGoal(goal.ID)
 	if err != nil {
 		return err
+	}
+
+	if e.useDAG {
+		sched := &executor.Scheduler{
+			MaxParallel: e.engineCfg.MaxParallel,
+			DepsMet:     e.dependenciesMet,
+			Run: func(ctx context.Context, task *storage.Task) error {
+				return e.runTask(ctx, goal, task)
+			},
+		}
+		return sched.RunReady(ctx, tasks)
 	}
 
 	var ready []*storage.Task

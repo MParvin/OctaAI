@@ -136,7 +136,8 @@ pkg/
 | Checkpoints, TF-IDF memory, plugins | Done | Memory is TF-IDF, not a vector DB |
 | Docker isolation, approval CLI | Done | Argv-safe Docker wrap |
 | Browser WebSocket + Firefox addon | Done | `plugins/firefox-addon`, path `/ws` |
-| HTN planner / DAG executor / AG2 / MCP | Packages only | Feature flags parsed but not wired (Phase 7) |
+| HTN planner / DAG executor / capabilities | Optional (flags) | `features.use_htn_planner`, `use_dag_executor`, `use_capabilities` |
+| AG2 / MCP / vector memory | Not implemented | Keep flags false |
 
 ## Failure Protection
 

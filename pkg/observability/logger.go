@@ -63,6 +63,9 @@ func NewLogger(store storage.Storage) *Logger {
 
 // Log writes a structured log entry.
 func (l *Logger) Log(goalID, taskID, level, message string, fields Fields) {
+	if l == nil || l.store == nil || goalID == "" {
+		return
+	}
 	data := ""
 	if len(fields) > 0 {
 		if b, err := json.Marshal(fields); err == nil {

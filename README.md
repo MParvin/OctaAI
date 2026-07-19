@@ -134,9 +134,28 @@ octaai/
 
 Core daemon + CLI, tools, permissions, Docker isolation, browser automation, and TF-IDF memory are production-usable.
 
-Experimental v2 packages (HTN planner, capability registry, workflow DAG helpers) exist but are **not** wired into the engine until Phase 7 of [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Do not enable `features.*` expecting behavior changes.
+Optional v2 flags (off by default):
+- `features.use_htn_planner` — HTN planning with v1 fallback
+- `features.use_dag_executor` — DAG scheduler for ready tasks
+- `features.use_capabilities` — builtin capability registry
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md).
+Still unimplemented: `enable_ag2`, `use_vector_memory`, `enable_mcp`, `enable_adaptive_replan`, `enable_reflection`.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md), and [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md).
+
+## Running in Docker (local-first)
+
+OctaAI is intentionally local-first — there is no Helm/Terraform/K8s chart. The multi-stage `Dockerfile` builds both binaries and runs as non-root user `octa`.
+
+```bash
+docker build -t octaai .
+docker run --rm -v "$HOME/.config/octaai:/home/octa/.config/octaai" \
+  -p 8766:8766 octaai --health-addr 0.0.0.0:8766
+```
+
+Health endpoints: `GET /healthz` (liveness), `GET /readyz` (readiness). Disable with `--health-addr=""`.
+
+For tool isolation inside goals, enable `isolation.enabled` / Docker sandbox in config (separate from running the daemon itself in a container).
 
 ## License
 

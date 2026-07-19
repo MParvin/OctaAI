@@ -22,15 +22,15 @@ type Config struct {
 	Features     FeatureFlags        `yaml:"features"`
 }
 
-// FeatureFlags holds experimental v2 toggles.
-// Most flags are parsed for forward compatibility but are not yet wired into
-// the production engine (pkg/engine). Leaving them true has no runtime effect
-// until the corresponding Phase 7 integration lands. See IMPLEMENTATION_PLAN.md.
+// FeatureFlags holds gradual-migration toggles for v2 architecture.
+// Wired today: use_htn_planner, use_dag_executor, use_capabilities.
+// Still unimplemented: enable_ag2, use_vector_memory, enable_mcp,
+// enable_adaptive_replan, enable_reflection. See IMPLEMENTATION_PLAN.md.
 type FeatureFlags struct {
-	// UseHTNPlanner — UNIMPLEMENTED in engine (packages exist under pkg/planner).
+	// UseHTNPlanner routes planning through pkg/planner HTN with v1 fallback.
 	UseHTNPlanner bool `yaml:"use_htn_planner"`
 
-	// UseDAGExecutor — UNIMPLEMENTED (pkg/workflow helpers are test-only today).
+	// UseDAGExecutor runs ready tasks via pkg/executor Scheduler.
 	UseDAGExecutor bool `yaml:"use_dag_executor"`
 
 	// EnableAG2 — UNIMPLEMENTED (no AutoGen integration).
@@ -39,7 +39,7 @@ type FeatureFlags struct {
 	// UseVectorMemory — UNIMPLEMENTED (memory uses TF-IDF in pkg/memory/semantic.go).
 	UseVectorMemory bool `yaml:"use_vector_memory"`
 
-	// UseCapabilities — registry code exists (pkg/capability) but engine ignores this flag.
+	// UseCapabilities registers builtin capabilities (also implied by UseHTNPlanner).
 	UseCapabilities bool `yaml:"use_capabilities"`
 
 	// EnableMCP — UNIMPLEMENTED.

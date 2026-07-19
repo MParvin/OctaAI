@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/mparvin/octaai/pkg/agent"
 	"github.com/mparvin/octaai/pkg/browser"
 	"github.com/mparvin/octaai/pkg/config"
+	"github.com/mparvin/octaai/pkg/health"
 	"github.com/mparvin/octaai/pkg/llm"
 	"github.com/mparvin/octaai/pkg/plugin"
 	"github.com/mparvin/octaai/pkg/storage"
@@ -32,6 +34,7 @@ func isProcessableState(state storage.State) bool {
 
 func main() {
 	browserPort := flag.Int("browser-port", 0, "Override browser WebSocket port (default: from config, usually 8765)")
+	healthAddr := flag.String("health-addr", "127.0.0.1:8766", "Daemon health/readiness listen address (empty to disable)")
 	flag.Parse()
 
 	fmt.Println("OctaAI Agent Daemon - Starting...")
@@ -49,6 +52,10 @@ func main() {
 	fmt.Printf("Using LLM: %s (%s)\n", cfg.LLM.Provider, cfg.LLM.Model)
 	fmt.Printf("Projects root: %s\n", cfg.ProjectsRoot)
 	fmt.Printf("Storage: %s\n", cfg.Storage.Path)
+	if cfg.Features.UseHTNPlanner || cfg.Features.UseDAGExecutor || cfg.Features.UseCapabilities {
+		fmt.Printf("Features: htn=%v dag=%v capabilities=%v\n",
+			cfg.Features.UseHTNPlanner, cfg.Features.UseDAGExecutor, cfg.Features.UseCapabilities)
+	}
 
 	llmProvider, err := llm.NewProvider(&cfg.LLM)
 	if err != nil {
@@ -90,6 +97,33 @@ func main() {
 
 	ag := agent.NewAgent(cfg, llmProvider, toolRegistry, store)
 
+	var healthServer *health.Server
+	if *healthAddr != "" {
+		healthServer = health.New(*healthAddr, func() map[string]interface{} {
+			out := map[string]interface{}{
+				"tools": len(toolRegistry.List()),
+				"feature_flags": map[string]bool{
+					"htn":          cfg.Features.UseHTNPlanner,
+					"dag":          cfg.Features.UseDAGExecutor,
+					"capabilities": cfg.Features.UseCapabilities,
+				},
+			}
+			if browserServer != nil {
+				out["browsers"] = len(browserServer.GetConnectedBrowsers())
+			}
+			if caps := ag.Engine().Capabilities(); caps != nil {
+				out["capability_count"] = len(caps.List())
+			}
+			return out
+		})
+		go func() {
+			if err := healthServer.Start(); err != nil && err != http.ErrServerClosed {
+				log.Printf("Health server error: %v", err)
+			}
+		}()
+		fmt.Printf("Health endpoints on http://%s/healthz and /readyz\n", *healthAddr)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -98,6 +132,10 @@ func main() {
 
 	fmt.Println("Agent daemon is running. Waiting for goals...")
 	fmt.Println("Press Ctrl+C to stop")
+
+	if healthServer != nil {
+		healthServer.SetReady(true)
+	}
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -156,6 +194,9 @@ func main() {
 		select {
 		case <-sigChan:
 			fmt.Println("\nShutting down...")
+			if healthServer != nil {
+				healthServer.SetReady(false)
+			}
 			cancel()
 			done := make(chan struct{})
 			go func() {
@@ -172,6 +213,9 @@ func main() {
 			_ = pluginRegistry.Shutdown(shutdownCtx)
 			if browserServer != nil {
 				_ = browserServer.Stop(shutdownCtx)
+			}
+			if healthServer != nil {
+				_ = healthServer.Shutdown(shutdownCtx)
 			}
 			return
 

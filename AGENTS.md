@@ -85,7 +85,8 @@ Configured via `llm.provider` in config. Supported values: `ollama` (default, no
  - `isolation`: enabled, docker (image/network/memory/cpu limits), require_docker_for
  - `browser`: enabled, port, token, browser_domains
  - `storage`: type, path (defaults to `~/.config/octaai/state.db`)
- - `features`: experimental v2 toggles (`use_htn_planner`, `use_dag_executor`, etc.) — **parsed but not wired** into the production engine; leave false (see `IMPLEMENTATION_PLAN.md` Phase 3/7).
+ - `features`: `use_htn_planner` / `use_dag_executor` / `use_capabilities` are wired; AG2/MCP/vector/reflection flags remain unimplemented.
+ - Daemon health: `--health-addr` (default `127.0.0.1:8766`) serves `/healthz` and `/readyz`.
 
 ### Memory note
 - `pkg/memory/semantic.go` is TF-IDF keyword retrieval, not a vector database. `features.use_vector_memory` is unimplemented.
